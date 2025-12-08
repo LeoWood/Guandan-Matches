@@ -1,0 +1,152 @@
+{% extends "base.html" %}
+{% block content %}
+<h1 class="mb-4">比赛详情</h1>
+<div class="card mb-3">
+    <div class="card-body">
+        <p class="card-text">时间: {{ match.time }}</p>
+        <p class="card-text">地点: {{ match.location }}</p>
+        <p class="card-text">人数: {{ match.player_count }}</p>
+        <p class="card-text">状态: 
+            {% if match.status == 'ongoing' %}
+                <span class="badge bg-primary">进行中</span>
+            {% else %}
+                <span class="badge bg-success">已结束</span>
+            {% endif %}
+        </p>
+    </div>
+</div>
+
+<h2 class="mt-4">队伍总分统计</h2>
+<table class="table table-striped mb-3 table-responsive">
+    <thead>
+        <tr>
+            <th>队伍</th>
+            <th>总分</th>
+            <th>级牌</th>
+        </tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td>奇数队</td>
+            <td>{{ team_scores[1] }}</td>
+            <td>{{ team_levels[1] }}</td>
+        </tr>
+        <tr>
+            <td>偶数队</td>
+            <td>{{ team_scores[2] }}</td>
+            <td>{{ team_levels[2] }}</td>
+        </tr>
+    </tbody>
+</table>
+<p>分数差: {{ score_difference }}
+    {% if leading_team %}
+        <span class="badge bg-success">
+            {{ '奇数队' if leading_team == 1 else '偶数队' }}领先
+        </span>
+    {% else %}
+        <span class="badge bg-secondary">平局</span>
+    {% endif %}
+</p>
+
+<a href="{{ url_for('index') }}" class="btn btn-secondary">返回主页</a>
+
+{% if match.status == 'ongoing' %}
+<h2 class="mt-4">录入本轮成绩</h2>
+<form method="POST" class="mb-4" id="scoreForm">
+    <input type="hidden" name="submit_scores" value="1">
+    {% for i in range(1, match.player_count + 1) %}
+    <div class="mb-3">
+        <label class="form-label">第 {{ i }} 名:</label>
+        <select class="form-select" name="player_{{ i }}">
+            {% for player in players %}
+            <option value="{{ player.id }}">{{ player.player_number }} - {{ player.name }}</option>
+            {% endfor %}
+        </select>
+    </div>
+    {% endfor %}
+    <button type="submit" class="btn btn-primary">提交成绩</button>
+</form>
+
+<script>
+    document.getElementById('scoreForm').addEventListener('submit', function(event) {
+        const selects = document.querySelectorAll('select[name^="player_"]');
+        const selectedValues = new Set();
+        let hasDuplicate = false;
+        
+        selects.forEach(select => {
+            const value = select.value;
+            if (selectedValues.has(value)) {
+                hasDuplicate = true;
+            } else {
+                selectedValues.add(value);
+            }
+        });
+        
+        if (hasDuplicate) {
+            alert('错误：不能选择重复的选手！');
+            event.preventDefault(); // 阻止表单提交
+        }
+    });
+</script>
+{% endif %}
+
+<h2 class="mt-4">个人总积分</h2>
+<table class="table table-striped">
+    <thead>
+        <tr>
+            <th>选手编号</th>
+            <th>姓名</th>
+            <th>队伍</th>
+            <th>总积分</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for player in sorted_players %}
+        <tr>
+            <td>{{ player.player_number }}</td>
+            <td>{{ player.name }}</td>
+            <td>{{ '奇数队' if player.team == 1 else '偶数队' }}</td>
+            <td>{{ total_scores[player.id] }}</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+
+{% if match.status == 'ongoing' %}
+<div class="mb-4">
+    <form method="POST" class="d-inline">
+        <input type="hidden" name="end_match" value="1">
+        <button type="submit" class="btn btn-warning" 
+                onclick="return confirm('确定要结束这场比赛吗？');">结束比赛</button>
+    </form>
+</div>
+{% endif %}
+
+
+<h2 class="mt-4">历史成绩</h2>
+{% for round, scores in rounds|dictsort(by='key', reverse=true) %}
+    <h3>第 {{ round }} 轮</h3>
+    <table class="table table-striped mb-3">
+        <thead>
+            <tr>
+                <th>名次</th>
+                <th>选手</th>
+                <th>队伍</th>
+                <th>积分</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for score in scores %}
+            <tr>
+                <td>{{ score.rank }}</td>
+                <td>{{ score.player.name }}</td>
+                <td>{{ '奇数队' if score.player.team == 1 else '偶数队' }}</td>
+                <td>{{ score.points }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+{% endfor %}
+
+
+{% endblock %}
