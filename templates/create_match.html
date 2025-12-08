@@ -1,0 +1,93 @@
+{% extends "base.html" %}
+{% block content %}
+<h1 class="mb-4">创建新比赛</h1>
+<form method="POST" class="needs-validation" novalidate>
+    <div class="mb-3">
+        <label class="form-label">参赛人数（4-12）:</label>
+        <input type="number" class="form-control" name="player_count" min="4" max="12" required>
+        <div class="invalid-feedback">请输入4-12之间的数字</div>
+    </div>
+    <div class="mb-3">
+        <label class="form-label">比赛时间:</label>
+        <input type="datetime-local" class="form-control" name="time" required>
+        <div class="invalid-feedback">请选择比赛时间</div>
+    </div>
+    <div class="mb-3">
+        <label class="form-label">比赛地点:</label>
+        <input type="text" class="form-control" name="location" required>
+        <div class="invalid-feedback">请输入比赛地点</div>
+    </div>
+    <h3 class="mt-4">选手信息</h3>
+    <div id="players" class="mb-3"></div>
+    <h3 class="mt-4">积分规则</h3>
+    <div id="rules" class="mb-3"></div>
+    <button type="submit" class="btn btn-success">创建比赛</button>
+</form>
+
+<script>
+document.querySelector('[name="player_count"]').addEventListener('change', function() {
+    const count = parseInt(this.value);
+    let playersHtml = '';
+    let rulesHtml = '';
+
+    // 默认积分规则
+    const defaultPoints = {
+        4: [14, 8, 4, 0],
+        6: [20, 16, 12, 8, 4, 0],
+        8: [30, 24, 20, 16, 12, 8, 4, 0],
+        10: [50, 42, 36, 30, 24, 18, 12, 8, 4, 0]
+    };
+
+    // 生成选手输入框
+    for(let i = 1; i <= count; i++) {
+        playersHtml += `
+            <div class="mb-2">
+                <label class="form-label">选手 ${i} 姓名:</label>
+                <input type="text" class="form-control" name="player_${i}" required>
+                <div class="invalid-feedback">请输入选手姓名</div>
+            </div>`;
+    }
+
+    // 生成积分规则输入框并填充默认值
+    if (defaultPoints[count]) {
+        const points = defaultPoints[count];
+        for(let i = 1; i <= count; i++) {
+            rulesHtml += `
+                <div class="mb-2">
+                    <label class="form-label">第 ${i} 名积分:</label>
+                    <input type="number" class="form-control" name="points_${i}" value="${points[i-1]}" required>
+                    <div class="invalid-feedback">请输入积分</div>
+                </div>`;
+        }
+    } else {
+        // 如果人数不在默认规则中，生成空输入框
+        for(let i = 1; i <= count; i++) {
+            rulesHtml += `
+                <div class="mb-2">
+                    <label class="form-label">第 ${i} 名积分:</label>
+                    <input type="number" class="form-control" name="points_${i}" required>
+                    <div class="invalid-feedback">请输入积分</div>
+                </div>`;
+        }
+    }
+
+    document.getElementById('players').innerHTML = playersHtml;
+    document.getElementById('rules').innerHTML = rulesHtml;
+});
+
+// Bootstrap 表单验证
+(() => {
+    'use strict'
+    const forms = document.querySelectorAll('.needs-validation')
+    Array.from(forms).forEach(form => {
+        form.addEventListener('submit', event => {
+            if (!form.checkValidity()) {
+                event.preventDefault()
+                event.stopPropagation()
+            }
+            form.classList.add('was-validated')
+        }, false)
+    })
+})();
+</script>
+{% endblock %}
