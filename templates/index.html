@@ -1,7 +1,10 @@
 {% extends "base.html" %}
 {% block content %}
 <h1 class="mb-4">掼蛋比赛计分板</h1>
-<a href="{{ url_for('create_match') }}" class="btn btn-primary mb-3">创建新比赛</a>
+<div class="mb-3">
+    <a href="{{ url_for('create_match') }}" class="btn btn-primary">创建新比赛</a>
+    <a href="{{ url_for('annual_report') }}" class="btn btn-warning">📊 年度总结报告</a>
+</div>
 <h2 class="mt-4">比赛列表</h2>
 <ul class="list-group mb-4">
     {% for match in matches %}

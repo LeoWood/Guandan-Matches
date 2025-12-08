@@ -1,0 +1,369 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="row mb-4">
+    <div class="col">
+        <h1 class="display-4">🎊 {{ year }}年度掼蛋总结报告</h1>
+        <a href="{{ url_for('index') }}" class="btn btn-secondary mt-2">返回主页</a>
+    </div>
+</div>
+
+{% if no_data %}
+<div class="alert alert-warning" role="alert">
+    <h4 class="alert-heading">暂无数据</h4>
+    <p>{{ year }}年度暂无比赛数据，请先创建一些比赛吧！</p>
+</div>
+{% else %}
+
+<!-- 基础统计 -->
+<div class="card mb-4 shadow-sm">
+    <div class="card-header bg-primary text-white">
+        <h3 class="mb-0">📊 基础统计</h3>
+    </div>
+    <div class="card-body">
+        <div class="row text-center">
+            <div class="col-md-3 mb-3">
+                <div class="border rounded p-3 bg-light">
+                    <h2 class="text-primary mb-0">{{ total_matches }}</h2>
+                    <p class="mb-0">总比赛场次</p>
+                    <small class="text-muted">(已完成: {{ finished_matches_count }})</small>
+                </div>
+            </div>
+            <div class="col-md-3 mb-3">
+                <div class="border rounded p-3 bg-light">
+                    <h2 class="text-success mb-0">{{ total_rounds }}</h2>
+                    <p class="mb-0">总轮次</p>
+                </div>
+            </div>
+            <div class="col-md-3 mb-3">
+                <div class="border rounded p-3 bg-light">
+                    <h2 class="text-info mb-0">{{ unique_players }}</h2>
+                    <p class="mb-0">参与选手数</p>
+                </div>
+            </div>
+            <div class="col-md-3 mb-3">
+                <div class="border rounded p-3 bg-light">
+                    <h2 class="text-warning mb-0">{{ total_participations }}</h2>
+                    <p class="mb-0">参赛人次</p>
+                </div>
+            </div>
+        </div>
+        
+        <h5 class="mt-4 mb-3">📅 月度比赛分布</h5>
+        <div class="row">
+            {% for month_data in monthly_data %}
+            <div class="col-6 col-md-2 mb-2">
+                <div class="text-center">
+                    <div class="progress" style="height: 30px;">
+                        <div class="progress-bar" role="progressbar" 
+                             style="width: {{ (month_data.count / total_matches * 100) if total_matches > 0 else 0 }}%"
+                             aria-valuenow="{{ month_data.count }}" aria-valuemin="0" aria-valuemax="{{ total_matches }}">
+                            <strong>{{ month_data.count }}</strong>
+                        </div>
+                    </div>
+                    <small>{{ month_data.month }}</small>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+        
+        {% if top_locations %}
+        <h5 class="mt-4 mb-3">📍 热门地点 TOP3</h5>
+        <ol class="list-group list-group-numbered">
+            {% for location, count in top_locations %}
+            <li class="list-group-item d-flex justify-content-between align-items-center">
+                {{ location }}
+                <span class="badge bg-primary rounded-pill">{{ count }} 场</span>
+            </li>
+            {% endfor %}
+        </ol>
+        {% endif %}
+    </div>
+</div>
+
+<!-- 荣誉榜单 -->
+<div class="card mb-4 shadow-sm">
+    <div class="card-header bg-success text-white">
+        <h3 class="mb-0">🏆 荣誉榜单</h3>
+    </div>
+    <div class="card-body">
+        <div class="row">
+            {% if top_scorer %}
+            <div class="col-md-6 mb-3">
+                <div class="card border-warning">
+                    <div class="card-body text-center">
+                        <h4 class="card-title">👑 年度积分王</h4>
+                        <h2 class="text-warning">{{ top_scorer[0] }}</h2>
+                        <p class="mb-0">总积分: <strong>{{ top_scorer[1]['total_score'] }}</strong></p>
+                        <small class="text-muted">参赛 {{ top_scorer[1]['matches'] }} 场</small>
+                    </div>
+                </div>
+            </div>
+            {% endif %}
+            
+            {% if top_win_rate %}
+            <div class="col-md-6 mb-3">
+                <div class="card border-success">
+                    <div class="card-body text-center">
+                        <h4 class="card-title">🔥 年度胜率王</h4>
+                        <h2 class="text-success">{{ top_win_rate[0] }}</h2>
+                        <p class="mb-0">胜率: <strong>{{ "%.2f"|format(top_win_rate[1]['wins'] / top_win_rate[1]['matches'] * 100) }}%</strong></p>
+                        <small class="text-muted">{{ top_win_rate[1]['wins'] }} 胜 / {{ top_win_rate[1]['matches'] }} 场（最少10场）</small>
+                    </div>
+                </div>
+            </div>
+            {% endif %}
+            
+            {% if iron_man %}
+            <div class="col-md-6 mb-3">
+                <div class="card border-info">
+                    <div class="card-body text-center">
+                        <h4 class="card-title">💪 铁人奖</h4>
+                        <h2 class="text-info">{{ iron_man[0] }}</h2>
+                        <p class="mb-0">参赛: <strong>{{ iron_man[1]['matches'] }}</strong> 场</p>
+                        <small class="text-muted">最勤奋的选手</small>
+                    </div>
+                </div>
+            </div>
+            {% endif %}
+            
+            {% if best_partners %}
+            <div class="col-md-6 mb-3">
+                <div class="card border-primary">
+                    <div class="card-body text-center">
+                        <h4 class="card-title">🤝 最佳搭档</h4>
+                        <h2 class="text-primary">{{ best_partners[0][0] }} & {{ best_partners[0][1] }}</h2>
+                        <p class="mb-0">胜率: <strong>{{ "%.2f"|format(best_partners[0][4] * 100) }}%</strong></p>
+                        <small class="text-muted">{{ best_partners[0][3] }} 胜 / {{ best_partners[0][2] }} 场（最少10场）</small>
+                    </div>
+                </div>
+            </div>
+            {% endif %}
+        </div>
+        
+        {% if best_partners and best_partners|length > 1 %}
+        <h5 class="mt-3 mb-3">最佳搭档榜</h5>
+        <table class="table table-striped table-hover">
+            <thead>
+                <tr>
+                    <th>排名</th>
+                    <th>选手1</th>
+                    <th>选手2</th>
+                    <th>合作场次</th>
+                    <th>胜场</th>
+                    <th>胜率</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for partner in best_partners %}
+                <tr>
+                    <td>{{ loop.index }}</td>
+                    <td>{{ partner[0] }}</td>
+                    <td>{{ partner[1] }}</td>
+                    <td>{{ partner[2] }}</td>
+                    <td>{{ partner[3] }}</td>
+                    <td><strong>{{ "%.2f"|format(partner[4] * 100) }}%</strong></td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% endif %}
+    </div>
+</div>
+
+<!-- 趣味数据 -->
+<div class="card mb-4 shadow-sm">
+    <div class="card-header bg-warning text-dark">
+        <h3 class="mb-0">🎯 趣味数据</h3>
+    </div>
+    <div class="card-body">
+        <div class="row">
+            {% if first_place_king %}
+            <div class="col-md-4 mb-3">
+                <div class="alert alert-warning text-center mb-0">
+                    <h5>🥇 头名收割机</h5>
+                    <h3>{{ first_place_king[0] }}</h3>
+                    <p class="mb-0">获得第一名 <strong>{{ first_place_king[1]['first_place'] }}</strong> 次</p>
+                </div>
+            </div>
+            {% endif %}
+            
+            {% if stable_player %}
+            <div class="col-md-4 mb-3">
+                <div class="alert alert-info text-center mb-0">
+                    <h5>📊 稳定先生/小姐</h5>
+                    <h3>{{ stable_player[0] }}</h3>
+                    <p class="mb-0">发挥最稳定</p>
+                    <small class="text-muted">名次波动最小（最少10场）</small>
+                </div>
+            </div>
+            {% endif %}
+            
+            {% if comeback_king %}
+            <div class="col-md-4 mb-3">
+                <div class="alert alert-danger text-center mb-0">
+                    <h5>💪 大心脏选手</h5>
+                    <h3>{{ comeback_king[0] }}</h3>
+                    <p class="mb-0">翻盘 <strong>{{ comeback_king[1]['comebacks'] }}</strong> 次</p>
+                    <small class="text-muted">绝地反击</small>
+                </div>
+            </div>
+            {% endif %}
+            
+            {% if level_master %}
+            <div class="col-md-4 mb-3">
+                <div class="alert alert-success text-center mb-0">
+                    <h5>🎴 级牌达人</h5>
+                    <h3>{{ level_master[0] }}</h3>
+                    <p class="mb-0">帮助队伍升级 <strong>{{ level_master[1]['level_ups'] }}</strong> 次</p>
+                </div>
+            </div>
+            {% endif %}
+            
+            {% if runner_up %}
+            <div class="col-md-4 mb-3">
+                <div class="alert alert-secondary text-center mb-0">
+                    <h5>🏃 陪跑达人</h5>
+                    <h3>{{ runner_up[0] }}</h3>
+                    <p class="mb-0">胜率: <strong>{{ "%.2f"|format(runner_up[1]['wins'] / runner_up[1]['matches'] * 100) }}%</strong></p>
+                    <small class="text-muted">重在参与（最少10场）</small>
+                </div>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+<!-- 对战记录 -->
+<div class="card mb-4 shadow-sm">
+    <div class="card-header bg-danger text-white">
+        <h3 class="mb-0">⚔️ 对战记录</h3>
+    </div>
+    <div class="card-body">
+        <div class="row">
+            {% if golden_partner %}
+            <div class="col-md-6 mb-3">
+                <div class="card bg-light">
+                    <div class="card-body text-center">
+                        <h5 class="card-title">🌟 黄金搭档</h5>
+                        <h4>{{ golden_partner[0] }} & {{ golden_partner[1] }}</h4>
+                        <p class="mb-0">
+                            合作 {{ golden_partner[2] }} 场，胜 {{ golden_partner[3] }} 场
+                            <br><strong class="text-success">胜率: {{ "%.2f"|format(golden_partner[4] * 100) }}%</strong>
+                        </p>
+                    </div>
+                </div>
+            </div>
+            {% endif %}
+            
+            {% if worst_partner %}
+            <div class="col-md-6 mb-3">
+                <div class="card bg-light">
+                    <div class="card-body text-center">
+                        <h5 class="card-title">😅 冤家对头</h5>
+                        <h4>{{ worst_partner[0] }} & {{ worst_partner[1] }}</h4>
+                        <p class="mb-0">
+                            合作 {{ worst_partner[2] }} 场，胜 {{ worst_partner[3] }} 场
+                            <br><strong class="text-danger">胜率: {{ "%.2f"|format(worst_partner[4] * 100) }}%</strong>
+                        </p>
+                    </div>
+                </div>
+            </div>
+            {% endif %}
+            
+            {% if strongest_rivalry %}
+            <div class="col-md-12 mb-3">
+                <div class="card bg-light">
+                    <div class="card-body text-center">
+                        <h5 class="card-title">🔥 最强宿敌</h5>
+                        <h4>{{ strongest_rivalry[0] }} vs {{ strongest_rivalry[1] }}</h4>
+                        <p class="mb-0">对战 <strong>{{ strongest_rivalry[2] }}</strong> 场（最少10场）</p>
+                        <small class="text-muted">棋逢对手</small>
+                    </div>
+                </div>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+<!-- 年度之最 -->
+<div class="card mb-4 shadow-sm">
+    <div class="card-header bg-info text-white">
+        <h3 class="mb-0">🌟 年度之最</h3>
+    </div>
+    <div class="card-body">
+        <div class="row">
+            {% if max_score_player %}
+            <div class="col-md-6 mb-3">
+                <div class="card border-primary">
+                    <div class="card-body">
+                        <h5 class="card-title">🚀 单场最高分</h5>
+                        <h3 class="text-primary">{{ max_score_player }}</h3>
+                        <p class="mb-1">积分: <strong>{{ max_single_score }}</strong></p>
+                        {% if max_score_match %}
+                        <small class="text-muted">
+                            {{ max_score_match.time.strftime('%Y-%m-%d') }} 
+                            @ {{ max_score_match.location }}
+                        </small>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+            {% endif %}
+            
+            {% if max_comeback_match and max_comeback > 0 %}
+            <div class="col-md-6 mb-3">
+                <div class="card border-warning">
+                    <div class="card-body">
+                        <h5 class="card-title">🔄 单轮最大翻盘</h5>
+                        <h3 class="text-warning">{{ max_comeback }} 分</h3>
+                        <small class="text-muted">
+                            {{ max_comeback_match.time.strftime('%Y-%m-%d') }} 
+                            @ {{ max_comeback_match.location }}
+                        </small>
+                    </div>
+                </div>
+            </div>
+            {% endif %}
+            
+            {% if closest_match %}
+            <div class="col-md-6 mb-3">
+                <div class="card border-success">
+                    <div class="card-body">
+                        <h5 class="card-title">⚡ 最激烈比赛</h5>
+                        <h3 class="text-success">分差: {{ min_diff }}</h3>
+                        <small class="text-muted">
+                            {{ closest_match.time.strftime('%Y-%m-%d') }} 
+                            @ {{ closest_match.location }}
+                        </small>
+                    </div>
+                </div>
+            </div>
+            {% endif %}
+            
+            {% if most_lopsided_match %}
+            <div class="col-md-6 mb-3">
+                <div class="card border-danger">
+                    <div class="card-body">
+                        <h5 class="card-title">💥 最悬殊比赛</h5>
+                        <h3 class="text-danger">分差: {{ max_diff }}</h3>
+                        <small class="text-muted">
+                            {{ most_lopsided_match.time.strftime('%Y-%m-%d') }} 
+                            @ {{ most_lopsided_match.location }}
+                        </small>
+                    </div>
+                </div>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+<div class="text-center mb-4">
+    <p class="text-muted">
+        <em>数据统计截至 {{ year }}年底 · 感谢所有参与的选手 🎉</em>
+    </p>
+</div>
+
+{% endif %}
+{% endblock %}
