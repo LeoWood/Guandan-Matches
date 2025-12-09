@@ -47,8 +47,8 @@ with app.app_context():
 def index():
     matches = Match.query.all()
 
-    # 按照时间先后排序
-    matches = sorted(matches, key=lambda m: m.time, reverse=True)
+    # 按照时间先后排序（处理 NULL 值）
+    matches = sorted(matches, key=lambda m: m.time if m.time else datetime.datetime.min, reverse=True)
 
     # 计算选手总分排行榜
     all_players = Player.query.all()
@@ -285,6 +285,14 @@ def annual_report():
     location_counter = Counter(m.location for m in matches)
     top_locations = location_counter.most_common(3)
     
+    # 最早/最晚开始时间
+    earliest_match = min(matches, key=lambda m: m.time.time()) if matches else None
+    latest_match = max(matches, key=lambda m: m.time.time()) if matches else None
+    
+    # 获取这两场比赛的玩家列表
+    earliest_players = Player.query.filter_by(match_id=earliest_match.id).all() if earliest_match else []
+    latest_players = Player.query.filter_by(match_id=latest_match.id).all() if latest_match else []
+    
     # === 荣誉榜单 ===
     # 计算每个选手的统计数据
     player_stats = defaultdict(lambda: {
@@ -293,8 +301,10 @@ def annual_report():
         'wins': 0,
         'first_place': 0,
         'ranks': [],
-        'level_ups': 0,
         'comebacks': 0,
+        'profit': 0,  # 收益/亏损
+        'max_single_round_score': 0,  # 单轮最高分
+        'match_rank_ranges': [],  # 每场比赛的名次范围（用于计算过山车）
         'teammates': defaultdict(lambda: {'matches': 0, 'wins': 0}),
         'opponents': defaultdict(lambda: {'matches': 0, 'wins': 0})
     })
@@ -305,13 +315,26 @@ def annual_report():
         
         # 计算个人总分
         player_total_scores = defaultdict(int)
+        player_match_ranks = defaultdict(list)  # 记录每个选手在本场比赛中的名次
         for score in round_scores:
             player = Player.query.get(score.player_id)
             player_total_scores[player.id] = player_total_scores.get(player.id, 0) + score.points
             player_stats[player.name]['total_score'] += score.points
             player_stats[player.name]['ranks'].append(score.rank)
+            player_match_ranks[player.name].append(score.rank)  # 记录本场名次
+            
+            # 更新单轮最高分
+            if score.points > player_stats[player.name]['max_single_round_score']:
+                player_stats[player.name]['max_single_round_score'] = score.points
+            
             if score.rank == 1:
                 player_stats[player.name]['first_place'] += 1
+        
+        # 计算每个选手在本场比赛的名次波动（过山车）
+        for player_name, ranks in player_match_ranks.items():
+            if len(ranks) > 1:
+                rank_range = max(ranks) - min(ranks)  # 最大名次 - 最小名次
+                player_stats[player_name]['match_rank_ranges'].append(rank_range)
         
         # 计算队伍总分
         team_scores = {1: 0, 2: 0}
@@ -320,6 +343,10 @@ def annual_report():
         
         winning_team = 1 if team_scores[1] > team_scores[2] else 2 if team_scores[2] > team_scores[1] else None
         
+        # 计算收益/亏损（积分差，88封顶）
+        score_diff = abs(team_scores[1] - team_scores[2])
+        score_diff = min(score_diff, 88)  # 积分差88封顶
+        
         # 统计胜负和参赛次数
         for player in players:
             name = player.name
@@ -327,6 +354,9 @@ def annual_report():
             
             if winning_team and player.team == winning_team:
                 player_stats[name]['wins'] += 1
+                player_stats[name]['profit'] += score_diff  # 赢家获得积分差（最多88）
+            elif winning_team:
+                player_stats[name]['profit'] -= score_diff  # 输家失去积分差（最多88）
             elif not winning_team:  # 平局算半场胜利
                 player_stats[name]['wins'] += 1
             
@@ -342,18 +372,11 @@ def annual_report():
                         if winning_team == player.team:
                             player_stats[name]['opponents'][other_player.name]['wins'] += 1
         
-        # 计算级牌升级（简化版：看第一名队伍）
+        # 计算翻盘次数（最后一轮从落后到领先）
         rounds = defaultdict(list)
         for score in round_scores:
             rounds[score.round_number].append(score)
         
-        for round_num in sorted(rounds.keys()):
-            round_data = sorted(rounds[round_num], key=lambda x: x.rank)
-            if round_data:
-                first_player = Player.query.get(round_data[0].player_id)
-                player_stats[first_player.name]['level_ups'] += 1
-        
-        # 计算翻盘次数（最后一轮从落后到领先）
         if len(rounds) >= 2:
             last_round = max(rounds.keys())
             second_last_round = last_round - 1
@@ -408,7 +431,7 @@ def annual_report():
     first_place_king = max(player_stats.items(), 
                           key=lambda x: x[1]['first_place']) if player_stats else None
     
-    # 稳定先生/小姐（名次方差最小，最少10场）
+    # 稳定达人（名次方差最小，最少10场）
     stable_candidates = [(name, stats) for name, stats in player_stats.items() 
                         if stats['matches'] >= 10 and len(stats['ranks']) > 0]
     stable_player = None
@@ -428,9 +451,59 @@ def annual_report():
         runner_up = min(runner_up_candidates, 
                        key=lambda x: x[1]['wins'] / x[1]['matches'])
     
-    # 级牌达人
-    level_master = max(player_stats.items(), 
-                      key=lambda x: x[1]['level_ups']) if player_stats else None
+    # === 新增趣味统计 ===
+    # 🎲 人形锦鲤（队友buff最强 - 和TA搭档，队友胜率提升最多）
+    lucky_charm = None
+    lucky_charm_boost = 0
+    for name, stats in player_stats.items():
+        if stats['matches'] >= 10:
+            # 计算所有队友的平均胜率提升
+            teammate_boosts = []
+            for teammate, team_stats in stats['teammates'].items():
+                if team_stats['matches'] >= 5:  # 至少合作5场
+                    # 和该选手搭档的胜率
+                    together_win_rate = team_stats['wins'] / team_stats['matches']
+                    # 该队友的总体胜率
+                    teammate_overall_win_rate = player_stats[teammate]['wins'] / player_stats[teammate]['matches'] if player_stats[teammate]['matches'] > 0 else 0
+                    boost = together_win_rate - teammate_overall_win_rate
+                    teammate_boosts.append(boost)
+            
+            if teammate_boosts:
+                avg_boost = sum(teammate_boosts) / len(teammate_boosts)
+                if avg_boost > lucky_charm_boost:
+                    lucky_charm_boost = avg_boost
+                    lucky_charm = (name, avg_boost, stats['matches'])
+    
+    # ☠️ 队友克星（和TA搭档，队友胜率降低最多）
+    bad_luck_charm = None
+    bad_luck_debuff = 0
+    for name, stats in player_stats.items():
+        if stats['matches'] >= 10:
+            teammate_debuffs = []
+            for teammate, team_stats in stats['teammates'].items():
+                if team_stats['matches'] >= 5:
+                    together_win_rate = team_stats['wins'] / team_stats['matches']
+                    teammate_overall_win_rate = player_stats[teammate]['wins'] / player_stats[teammate]['matches'] if player_stats[teammate]['matches'] > 0 else 0
+                    debuff = together_win_rate - teammate_overall_win_rate
+                    teammate_debuffs.append(debuff)
+            
+            if teammate_debuffs:
+                avg_debuff = sum(teammate_debuffs) / len(teammate_debuffs)
+                if avg_debuff < bad_luck_debuff:
+                    bad_luck_debuff = avg_debuff
+                    bad_luck_charm = (name, avg_debuff, stats['matches'])
+    
+    # 🌪️ 过山车玩家（单场比赛名次波动最大）
+    rollercoaster_player = None
+    max_rank_swing = 0
+    for name, stats in player_stats.items():
+        if stats['matches'] >= 10 and stats['match_rank_ranges']:
+            # 计算平均单场名次波动
+            avg_swing = sum(stats['match_rank_ranges']) / len(stats['match_rank_ranges'])
+            max_swing_in_match = max(stats['match_rank_ranges'])
+            if max_swing_in_match > max_rank_swing:
+                max_rank_swing = max_swing_in_match
+                rollercoaster_player = (name, max_swing_in_match, avg_swing, stats['matches'])
     
     # === 对战记录 ===
     # 最强宿敌（对战次数最多，最少10场）
@@ -443,6 +516,18 @@ def annual_report():
                 rivalries.append((name, opponent, opp_stats['matches']))
                 processed_pairs.add(pair)
     strongest_rivalry = max(rivalries, key=lambda x: x[2]) if rivalries else None
+    
+    # 最佳拍档（搭档次数最多，不考虑胜率）
+    most_frequent_partners = []
+    processed_teammate_pairs = set()
+    for name, stats in player_stats.items():
+        for teammate, team_stats in stats['teammates'].items():
+            pair = tuple(sorted([name, teammate]))
+            if pair not in processed_teammate_pairs:
+                most_frequent_partners.append((name, teammate, team_stats['matches'], team_stats['wins']))
+                processed_teammate_pairs.add(pair)
+    most_frequent_partners = sorted(most_frequent_partners, key=lambda x: x[2], reverse=True)
+    most_frequent_partner = most_frequent_partners[0] if most_frequent_partners else None
     
     # 黄金搭档 vs 冤家对头
     golden_partner = best_partners[0] if best_partners else None
@@ -534,6 +619,13 @@ def annual_report():
             max_diff = diff
             most_lopsided_match = match
     
+    # 收益/亏损统计
+    profit_rankings = sorted([(name, stats['profit']) for name, stats in player_stats.items()],
+                            key=lambda x: x[1], reverse=True)
+    
+    top_profit_maker = profit_rankings[0] if profit_rankings else None
+    biggest_loser = profit_rankings[-1] if profit_rankings else None
+    
     return render_template('annual_report.html',
                          year=year,
                          no_data=False,
@@ -545,6 +637,10 @@ def annual_report():
                          unique_players=unique_players,
                          monthly_data=monthly_data,
                          top_locations=top_locations,
+                         earliest_match=earliest_match,
+                         latest_match=latest_match,
+                         earliest_players=earliest_players,
+                         latest_players=latest_players,
                          # 荣誉榜单
                          top_scorer=top_scorer,
                          top_win_rate=top_win_rate,
@@ -555,9 +651,12 @@ def annual_report():
                          stable_player=stable_player,
                          comeback_king=comeback_king,
                          runner_up=runner_up,
-                         level_master=level_master,
+                         lucky_charm=lucky_charm,
+                         bad_luck_charm=bad_luck_charm,
+                         rollercoaster_player=rollercoaster_player,
                          # 对战记录
                          strongest_rivalry=strongest_rivalry,
+                         most_frequent_partner=most_frequent_partner,
                          golden_partner=golden_partner,
                          worst_partner=worst_partner,
                          # 年度之最
@@ -569,7 +668,11 @@ def annual_report():
                          closest_match=closest_match,
                          min_diff=min_diff,
                          most_lopsided_match=most_lopsided_match,
-                         max_diff=max_diff)
+                         max_diff=max_diff,
+                         # 收益亏损
+                         top_profit_maker=top_profit_maker,
+                         biggest_loser=biggest_loser,
+                         profit_rankings=profit_rankings)
 
 
 # # 运行应用
