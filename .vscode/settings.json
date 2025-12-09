@@ -1,0 +1,11 @@
+{
+    "sqltools.connections": [
+        {
+            "previewLimit": 50,
+            "driver": "SQLite",
+            "database": "${workspaceFolder:guandan}/instance/guandan.db",
+            "name": "guandan.db"
+        }
+    ],
+    "sqltools.useNodeRuntime": true
+}
