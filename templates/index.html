@@ -1,9 +1,8 @@
 {% extends "base.html" %}
 {% block content %}
-<h1 class="mb-4">掼蛋比赛计分板</h1>
+<h1 class="mb-4" id="page-title" style="cursor: pointer; user-select: none; transition: all 0.3s ease;">掼蛋比赛计分板</h1>
 <div class="mb-3">
     <a href="{{ url_for('create_match') }}" class="btn btn-primary">创建新比赛</a>
-    <a href="{{ url_for('annual_report') }}" class="btn btn-warning">📊 年度总结报告</a>
 </div>
 <h2 class="mt-4">比赛列表</h2>
 <ul class="list-group mb-4">
@@ -80,4 +79,48 @@
 {% else %}
 <p class="text-muted">暂无胜率数据，请先结束一些比赛。</p>
 {% endif %}
+
+<script>
+// 彩蛋：连续点击页面标题3次打开年度总结报告
+let clickCount = 0;
+let clickTimer = null;
+
+document.getElementById('page-title').addEventListener('click', function(e) {
+    // 阻止默认行为
+    e.preventDefault();
+    
+    clickCount++;
+    const title = this;
+    
+    // 给一个小的抖动效果反馈
+    title.style.transform = 'scale(1.05)';
+    setTimeout(() => {
+        title.style.transform = 'scale(1)';
+    }, 100);
+    
+    // 如果点击达到3次，显示提示并跳转
+    if (clickCount === 3) {
+        // 添加成功动画和提示
+        title.style.color = '#ffc107';
+        title.innerHTML = '🎉 正在打开年度总结报告...';
+        title.style.transform = 'scale(1.1)';
+        
+        // 延迟跳转，让用户看到提示
+        setTimeout(function() {
+            window.location.href = "{{ url_for('annual_report') }}";
+        }, 500);
+        return;
+    }
+    
+    // 清除之前的计时器
+    if (clickTimer) {
+        clearTimeout(clickTimer);
+    }
+    
+    // 设置计时器，1秒后重置计数
+    clickTimer = setTimeout(function() {
+        clickCount = 0;
+    }, 1000);
+});
+</script>
 {% endblock %}
