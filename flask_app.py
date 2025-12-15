@@ -49,40 +49,63 @@ def index():
     page = request.args.get('page', 1, type=int)
     per_page = 10  # 每页10条记录
     
-    matches = Match.query.all()
-
-    # 按照时间先后排序（处理 NULL 值）
-    matches = sorted(matches, key=lambda m: m.time if m.time else datetime.datetime.min, reverse=True)
-    
-    # 计算总页数
-    total_matches = len(matches)
+    # 优化：使用数据库分页，只查询当前页需要的数据
+    total_matches = Match.query.count()
     total_pages = (total_matches + per_page - 1) // per_page  # 向上取整
     
-    # 分页切片
-    start_idx = (page - 1) * per_page
-    end_idx = start_idx + per_page
-    paginated_matches = matches[start_idx:end_idx]
+    # 只查询当前页的数据
+    paginated_matches = Match.query.order_by(
+        Match.time.desc().nullslast()
+    ).limit(per_page).offset((page - 1) * per_page).all()
+    
+    # 为了计算胜率，仍需要所有已完成比赛的列表（但只查询ID和状态）
+    all_match_ids = db.session.query(Match.id, Match.status).all()
 
-    # 计算选手总分排行榜
-    all_players = Player.query.all()
-    player_scores = {}
-    for player in all_players:
-        name = player.name
-        if name not in player_scores:
-            player_scores[name] = 0
-        scores = RoundScore.query.filter_by(player_id=player.id).all()
-        player_scores[name] += sum(score.points for score in scores if score.points is not None)
-    sorted_score_rankings = sorted(player_scores.items(), key=lambda x: x[1], reverse=True)
-    score_rankings_with_index = [(i + 1, name, score) for i, (name, score) in enumerate(sorted_score_rankings)]
+    # 优化：使用一次查询获取所有分数，按玩家名称聚合
+    # 使用数据库的 JOIN 和聚合功能
+    score_query = db.session.query(
+        Player.name,
+        db.func.sum(RoundScore.points).label('total_score')
+    ).join(RoundScore, Player.id == RoundScore.player_id
+    ).filter(RoundScore.points.isnot(None)
+    ).group_by(Player.name
+    ).order_by(db.desc('total_score')).all()
+    
+    player_scores = {name: score for name, score in score_query}
+    score_rankings_with_index = [(i + 1, name, score) for i, (name, score) in enumerate(score_query)]
 
-    # 计算选手胜率排行榜
-    player_stats = {}  # {name: {'matches': 场次, 'wins': 胜场}}
-    for match in matches:
-        if match.status == 'finished':  # 只统计已结束的比赛
-            players = Player.query.filter_by(match_id=match.id).all()
+    # 优化：使用一次查询获取所有已完成比赛的玩家和分数
+    finished_match_ids = [m_id for m_id, status in all_match_ids if status == 'finished']
+    
+    if finished_match_ids:
+        # 一次性加载所有需要的数据
+        all_players_in_finished = Player.query.filter(Player.match_id.in_(finished_match_ids)).all()
+        all_scores_in_finished = RoundScore.query.filter(RoundScore.match_id.in_(finished_match_ids)).all()
+        
+        # 构建索引以快速查找
+        players_by_match = {}
+        for player in all_players_in_finished:
+            if player.match_id not in players_by_match:
+                players_by_match[player.match_id] = []
+            players_by_match[player.match_id].append(player)
+        
+        scores_by_match_player = {}
+        for score in all_scores_in_finished:
+            key = (score.match_id, score.player_id)
+            if key not in scores_by_match_player:
+                scores_by_match_player[key] = []
+            scores_by_match_player[key].append(score)
+        
+        # 计算选手胜率排行榜
+        player_stats = {}  # {name: {'matches': 场次, 'wins': 胜场}}
+        for match_id in finished_match_ids:
+            players = players_by_match.get(match_id, [])
+            if not players:
+                continue
+                
             total_scores = {}
             for player in players:
-                player_scores = RoundScore.query.filter_by(match_id=match.id, player_id=player.id).all()
+                player_scores = scores_by_match_player.get((match_id, player.id), [])
                 total_scores[player.id] = sum(score.points for score in player_scores if score.points is not None)
 
             team_scores = {1: 0, 2: 0}
@@ -101,6 +124,8 @@ def index():
                 # 如果平局，算两边都胜利
                 if not winning_team:
                     player_stats[name]['wins'] += 1
+    else:
+        player_stats = {}
 
     # 计算胜率并排序
     win_rate_rankings = []
@@ -187,17 +212,24 @@ def match_detail(match_id):
 
         return redirect(url_for('match_detail', match_id=match_id))
 
+    # 一次性查询所有分数，避免N+1问题
     scores = RoundScore.query.filter_by(match_id=match_id).all()
+    
+    # 构建轮次字典
     rounds = {}
     for score in scores:
         if score.round_number not in rounds:
             rounds[score.round_number] = []
         rounds[score.round_number].append(score)
 
+    # 使用已查询的scores计算每个玩家的总分（避免重复查询）
     total_scores = {}
     for player in players:
-        player_scores = RoundScore.query.filter_by(match_id=match_id, player_id=player.id).all()
-        total_scores[player.id] = sum(score.points for score in player_scores)
+        total_scores[player.id] = 0
+    
+    for score in scores:
+        if score.player_id in total_scores:
+            total_scores[score.player_id] += score.points
 
     sorted_players = sorted(players, key=lambda p: total_scores.get(p.id, 0), reverse=True)
 
@@ -211,6 +243,9 @@ def match_detail(match_id):
     # 计算级牌
     level_cards = ['2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K', 'A']
     team_levels = {1: 0, 2: 0}  # 初始级牌为 '2'，索引 0
+    
+    # 构建玩家ID到玩家的索引（避免循环中查询数据库）
+    players_by_id = {p.id: p for p in players}
 
     for round_num in sorted(rounds.keys()):
         round_scores = rounds[round_num]
@@ -220,14 +255,16 @@ def match_detail(match_id):
         # 计算每队本轮的名次
         team_ranks = {1: [], 2: []}
         for score in sorted_round_scores:
-            player = Player.query.get(score.player_id)
-            team_ranks[player.team].append(score.rank)
+            player = players_by_id.get(score.player_id)
+            if player:
+                team_ranks[player.team].append(score.rank)
 
         # 确定第一名的队伍
-        first_team = Player.query.get(sorted_round_scores[0].player_id).team
+        first_player = players_by_id.get(sorted_round_scores[0].player_id)
+        first_team = first_player.team if first_player else None
 
         # 计算完全领先人数
-        if team_ranks[1] and team_ranks[2]:  # 确保两队都有数据
+        if team_ranks[1] and team_ranks[2] and first_team:  # 确保两队都有数据
             if first_team == 1:
                 opponent_best_rank = min(team_ranks[2])  # 偶数队最好名次
                 leading_count = sum(1 for rank in team_ranks[1] if rank < opponent_best_rank)
@@ -280,16 +317,30 @@ def annual_report():
     if not matches:
         return render_template('annual_report.html', year=year, no_data=True)
     
+    # === 预加载所有数据，减少数据库查询 ===
+    match_ids = [m.id for m in matches]
+    
+    # 一次性加载所有玩家和分数
+    all_players = Player.query.filter(Player.match_id.in_(match_ids)).all()
+    all_scores = RoundScore.query.filter(RoundScore.match_id.in_(match_ids)).all()
+    
+    # 构建快速查找索引
+    players_by_match = defaultdict(list)
+    players_by_id = {}
+    for player in all_players:
+        players_by_match[player.match_id].append(player)
+        players_by_id[player.id] = player
+    
+    scores_by_match = defaultdict(list)
+    for score in all_scores:
+        scores_by_match[score.match_id].append(score)
+    
     # === 基础统计 ===
     total_matches = len(matches)
     finished_matches = [m for m in matches if m.status == 'finished']
-    total_rounds = sum(len(RoundScore.query.filter_by(match_id=m.id).all()) // m.player_count for m in matches)
+    total_rounds = sum(len(scores_by_match[m.id]) // m.player_count for m in matches)
     
     # 参与人次
-    all_players = []
-    for match in matches:
-        players = Player.query.filter_by(match_id=match.id).all()
-        all_players.extend(players)
     total_participations = len(all_players)
     unique_players = len(set(p.name for p in all_players))
     
@@ -308,9 +359,9 @@ def annual_report():
     earliest_match = min(matches, key=lambda m: m.time.time()) if matches else None
     latest_match = max(matches, key=lambda m: m.time.time()) if matches else None
     
-    # 获取这两场比赛的玩家列表
-    earliest_players = Player.query.filter_by(match_id=earliest_match.id).all() if earliest_match else []
-    latest_players = Player.query.filter_by(match_id=latest_match.id).all() if latest_match else []
+    # 使用预加载的数据获取玩家列表
+    earliest_players = players_by_match.get(earliest_match.id, []) if earliest_match else []
+    latest_players = players_by_match.get(latest_match.id, []) if latest_match else []
     
     # === 荣誉榜单 ===
     # 计算每个选手的统计数据
@@ -329,14 +380,16 @@ def annual_report():
     })
     
     for match in finished_matches:
-        players = Player.query.filter_by(match_id=match.id).all()
-        round_scores = RoundScore.query.filter_by(match_id=match.id).all()
+        players = players_by_match.get(match.id, [])
+        round_scores = scores_by_match.get(match.id, [])
         
         # 计算个人总分
         player_total_scores = defaultdict(int)
         player_match_ranks = defaultdict(list)  # 记录每个选手在本场比赛中的名次
         for score in round_scores:
-            player = Player.query.get(score.player_id)
+            player = players_by_id.get(score.player_id)
+            if not player:
+                continue
             player_total_scores[player.id] = player_total_scores.get(player.id, 0) + score.points
             player_stats[player.name]['total_score'] += score.points
             player_stats[player.name]['ranks'].append(score.rank)
@@ -404,14 +457,16 @@ def annual_report():
                 # 倒数第二轮的队伍分数
                 team_scores_before = {1: 0, 2: 0}
                 for score in rounds[second_last_round]:
-                    player = Player.query.get(score.player_id)
-                    team_scores_before[player.team] += score.points
+                    player = players_by_id.get(score.player_id)
+                    if player:
+                        team_scores_before[player.team] += score.points
                 
                 # 最后一轮的队伍分数
                 team_scores_after = {1: 0, 2: 0}
                 for score in rounds[last_round]:
-                    player = Player.query.get(score.player_id)
-                    team_scores_after[player.team] += score.points
+                    player = players_by_id.get(score.player_id)
+                    if player:
+                        team_scores_after[player.team] += score.points
                 
                 # 判断是否翻盘
                 if (team_scores_before[1] < team_scores_before[2] and 
@@ -561,26 +616,32 @@ def annual_report():
     worst_partner = worst_partners[0] if worst_partners else None
     
     # === 年度之最 ===
+    # 使用预加载的数据计算
+    
+    # 构建每场比赛每个玩家的总分索引
+    match_player_totals = defaultdict(lambda: defaultdict(int))  # {match_id: {player_id: total_score}}
+    for score in all_scores:
+        match_player_totals[score.match_id][score.player_id] += score.points
+    
     # 单场最高分
     max_single_score = 0
     max_score_player = None
     max_score_match = None
     for match in finished_matches:
-        players = Player.query.filter_by(match_id=match.id).all()
-        for player in players:
-            scores = RoundScore.query.filter_by(match_id=match.id, player_id=player.id).all()
-            total = sum(s.points for s in scores)
+        for player_id, total in match_player_totals[match.id].items():
             if total > max_single_score:
                 max_single_score = total
-                max_score_player = player.name
-                max_score_match = match
+                player = players_by_id.get(player_id)
+                if player:
+                    max_score_player = player.name
+                    max_score_match = match
     
-    # 单轮最大翻盘
+    # 单轮最大翻盘（使用预加载的数据）
     max_comeback = 0
     max_comeback_match = None
     for match in finished_matches:
+        round_scores = scores_by_match.get(match.id, [])
         rounds = defaultdict(list)
-        round_scores = RoundScore.query.filter_by(match_id=match.id).all()
         for score in round_scores:
             rounds[score.round_number].append(score)
         
@@ -591,14 +652,16 @@ def annual_report():
                     # 计算前一轮队伍分差
                     team_scores_prev = {1: 0, 2: 0}
                     for score in rounds[prev_round]:
-                        player = Player.query.get(score.player_id)
-                        team_scores_prev[player.team] += score.points
+                        player = players_by_id.get(score.player_id)
+                        if player:
+                            team_scores_prev[player.team] += score.points
                     
                     # 计算当前轮队伍分差
                     team_scores_curr = {1: 0, 2: 0}
                     for score in rounds[round_num]:
-                        player = Player.query.get(score.player_id)
-                        team_scores_curr[player.team] += score.points
+                        player = players_by_id.get(score.player_id)
+                        if player:
+                            team_scores_curr[player.team] += score.points
                     
                     diff_prev = abs(team_scores_prev[1] - team_scores_prev[2])
                     diff_curr = abs(team_scores_curr[1] - team_scores_curr[2])
@@ -608,32 +671,23 @@ def annual_report():
                         max_comeback = comeback
                         max_comeback_match = match
     
-    # 最激烈比赛（分差最小）
+    # 最激烈比赛（分差最小）和最悬殊比赛（分差最大）
+    # 使用预加载的数据一次性计算
     min_diff = float('inf')
     closest_match = None
+    max_diff = 0
+    most_lopsided_match = None
+    
     for match in finished_matches:
-        players = Player.query.filter_by(match_id=match.id).all()
+        players = players_by_match.get(match.id, [])
         team_scores = {1: 0, 2: 0}
         for player in players:
-            scores = RoundScore.query.filter_by(match_id=match.id, player_id=player.id).all()
-            team_scores[player.team] += sum(s.points for s in scores)
+            team_scores[player.team] += match_player_totals[match.id].get(player.id, 0)
         
         diff = abs(team_scores[1] - team_scores[2])
         if diff < min_diff:
             min_diff = diff
             closest_match = match
-    
-    # 最悬殊比赛（分差最大）
-    max_diff = 0
-    most_lopsided_match = None
-    for match in finished_matches:
-        players = Player.query.filter_by(match_id=match.id).all()
-        team_scores = {1: 0, 2: 0}
-        for player in players:
-            scores = RoundScore.query.filter_by(match_id=match.id, player_id=player.id).all()
-            team_scores[player.team] += sum(s.points for s in scores)
-        
-        diff = abs(team_scores[1] - team_scores[2])
         if diff > max_diff:
             max_diff = diff
             most_lopsided_match = match
