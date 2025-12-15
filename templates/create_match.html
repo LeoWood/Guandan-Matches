@@ -14,7 +14,29 @@
     </div>
     <div class="mb-3">
         <label class="form-label">比赛地点:</label>
-        <input type="text" class="form-control" name="location" required>
+        <div class="d-flex flex-wrap gap-2 mb-2">
+            <div class="form-check">
+                <input class="form-check-input" type="radio" name="location_select" id="loc1" value="保利和光" checked>
+                <label class="form-check-label" for="loc1">保利和光</label>
+            </div>
+            <div class="form-check">
+                <input class="form-check-input" type="radio" name="location_select" id="loc2" value="保利云启">
+                <label class="form-check-label" for="loc2">保利云启</label>
+            </div>
+            <div class="form-check">
+                <input class="form-check-input" type="radio" name="location_select" id="loc3" value="林上湾">
+                <label class="form-check-label" for="loc3">林上湾</label>
+            </div>
+            <div class="form-check">
+                <input class="form-check-input" type="radio" name="location_select" id="loc4" value="中海">
+                <label class="form-check-label" for="loc4">中海</label>
+            </div>
+            <div class="form-check">
+                <input class="form-check-input" type="radio" name="location_select" id="loc_custom" value="custom">
+                <label class="form-check-label" for="loc_custom">自定义</label>
+            </div>
+        </div>
+        <input type="text" class="form-control" id="location_input" name="location" value="保利和光" readonly required>
         <div class="invalid-feedback">请输入比赛地点</div>
     </div>
     <h3 class="mt-4">选手信息</h3>
@@ -73,6 +95,25 @@ document.querySelector('[name="player_count"]').addEventListener('change', funct
 
     document.getElementById('players').innerHTML = playersHtml;
     document.getElementById('rules').innerHTML = rulesHtml;
+});
+
+// 地点选择逻辑
+const locationRadios = document.querySelectorAll('input[name="location_select"]');
+const locationInput = document.getElementById('location_input');
+
+locationRadios.forEach(radio => {
+    radio.addEventListener('change', function() {
+        if (this.value === 'custom') {
+            locationInput.readOnly = false;
+            locationInput.value = '';
+            locationInput.focus();
+            locationInput.placeholder = "请输入自定义地点";
+        } else {
+            locationInput.readOnly = true;
+            locationInput.value = this.value;
+            locationInput.placeholder = "";
+        }
+    });
 });
 
 // Bootstrap 表单验证

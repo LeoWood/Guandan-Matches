@@ -45,10 +45,23 @@ with app.app_context():
 
 @app.route('/')
 def index():
+    # 获取分页参数，默认第1页
+    page = request.args.get('page', 1, type=int)
+    per_page = 10  # 每页10条记录
+    
     matches = Match.query.all()
 
     # 按照时间先后排序（处理 NULL 值）
     matches = sorted(matches, key=lambda m: m.time if m.time else datetime.datetime.min, reverse=True)
+    
+    # 计算总页数
+    total_matches = len(matches)
+    total_pages = (total_matches + per_page - 1) // per_page  # 向上取整
+    
+    # 分页切片
+    start_idx = (page - 1) * per_page
+    end_idx = start_idx + per_page
+    paginated_matches = matches[start_idx:end_idx]
 
     # 计算选手总分排行榜
     all_players = Player.query.all()
@@ -97,7 +110,13 @@ def index():
     sorted_win_rate_rankings = sorted(win_rate_rankings, key=lambda x: (x[3], x[1]), reverse=True)
     win_rate_rankings_with_index = [(i + 1, name, matches, wins, f"{win_rate:.2%}") for i, (name, matches, wins, win_rate) in enumerate(sorted_win_rate_rankings)]
 
-    return render_template('index.html', matches=matches, score_rankings=score_rankings_with_index, win_rate_rankings=win_rate_rankings_with_index)
+    return render_template('index.html', 
+                         matches=paginated_matches, 
+                         score_rankings=score_rankings_with_index, 
+                         win_rate_rankings=win_rate_rankings_with_index,
+                         page=page,
+                         total_pages=total_pages,
+                         total_matches=total_matches)
 
 @app.route('/create_match', methods=['GET', 'POST'])
 def create_match():
