@@ -3,9 +3,9 @@
 <h1 class="mb-4">创建新比赛</h1>
 <form method="POST" class="needs-validation" novalidate>
     <div class="mb-3">
-        <label class="form-label">参赛人数（4-12）:</label>
-        <input type="number" class="form-control" name="player_count" min="4" max="12" required>
-        <div class="invalid-feedback">请输入4-12之间的数字</div>
+        <label class="form-label">参赛人数（4-12之间的偶数）:</label>
+        <input type="number" class="form-control" name="player_count" min="4" max="12" step="2" required>
+        <div class="invalid-feedback">请输入4-12之间的偶数（4, 6, 8, 10, 12）</div>
     </div>
     <div class="mb-3">
         <label class="form-label">比赛时间:</label>
@@ -41,17 +41,112 @@
     </div>
     <h3 class="mt-4">选手信息</h3>
     <div id="players" class="mb-3"></div>
+    
+    <!-- 分组功能 -->
+    <div id="grouping-controls" class="mb-4" style="display: none;">
+        <div class="card">
+            <div class="card-header bg-info text-white">
+                <h5 class="mb-0"> 分组功能</h5>
+            </div>
+            <div class="card-body">
+                <div class="mb-3">
+                    <button type="button" class="btn btn-primary" id="randomGroupBtn">
+                        <i class="bi bi-shuffle"></i> 随机分组
+                    </button>
+                    <button type="button" class="btn btn-secondary ms-2" id="setHedgeBtn">
+                        <i class="bi bi-link-45deg"></i> 设置对冲玩家
+                    </button>
+                </div>
+                
+                <!-- 对冲玩家设置区域 -->
+                <div id="hedge-settings" style="display: none;">
+                    <div class="alert alert-info">
+                        <i class="bi bi-info-circle"></i> 对冲玩家不会被分到同一队。每组选择两名玩家，最多可设置 <span id="maxHedgeGroups"></span> 组。
+                    </div>
+                    <div id="hedge-groups"></div>
+                    <button type="button" class="btn btn-sm btn-outline-primary" id="addHedgeGroupBtn">
+                        <i class="bi bi-plus-circle"></i> 添加对冲组
+                    </button>
+                </div>
+                
+                <!-- 当前分组显示 -->
+                <div id="current-teams" class="mt-3"></div>
+            </div>
+        </div>
+    </div>
+    
     <h3 class="mt-4">积分规则</h3>
     <div id="rules" class="mb-3"></div>
     <button type="submit" class="btn btn-success">创建比赛</button>
 </form>
 
 <script>
+let playerNames = [];
+let playerOrder = [];
+let hedgeGroups = [];
+
 document.querySelector('[name="player_count"]').addEventListener('change', function() {
     const count = parseInt(this.value);
-    let playersHtml = '';
-    let rulesHtml = '';
+    
+    // 验证是否为偶数
+    if (count % 2 !== 0 || count < 4 || count > 12) {
+        alert('参赛人数必须是4-12之间的偶数（4, 6, 8, 10, 12）！');
+        this.value = '';
+        return;
+    }
+    
+    playerNames = [];
+    playerOrder = [];
+    hedgeGroups = [];
+    
+    // 初始化玩家顺序（从0开始）
+    for(let i = 0; i < count; i++) {
+        playerOrder.push(i);
+    }
+    
+    generatePlayerInputs(count);
+    generateRulesInputs(count);
+    
+    // 显示分组控制
+    if (count >= 4) {
+        document.getElementById('grouping-controls').style.display = 'block';
+        document.getElementById('maxHedgeGroups').textContent = Math.floor(count / 2);
+    }
+});
 
+function generatePlayerInputs(count) {
+    let playersHtml = '';
+    
+    // 生成选手输入框
+    for(let i = 1; i <= count; i++) {
+        const team = i % 2 === 1 ? '队伍1' : '队伍2';
+        const teamColor = i % 2 === 1 ? 'primary' : 'success';
+        playersHtml += `
+            <div class="mb-2 player-input" data-order="${i}">
+                <label class="form-label">
+                    选手 ${i} 姓名 
+                <span class="badge bg-${teamColor}">${team}</span>
+                </label>
+                <input type="text" class="form-control player-name-input" name="player_${i}" required>
+                <div class="invalid-feedback">请输入选手姓名</div>
+            </div>`;
+    }
+
+    document.getElementById('players').innerHTML = playersHtml;
+    
+    // 监听玩家名字输入
+    document.querySelectorAll('.player-name-input').forEach((input, index) => {
+        input.addEventListener('input', function() {
+            playerNames[index] = this.value;
+        });
+    });
+    
+    updateTeamsDisplay();
+}
+
+function generateRulesInputs(count) {
+    let rulesHtml = '';
+    
     // 默认积分规则
     const defaultPoints = {
         4: [14, 8, 4, 0],
@@ -59,16 +154,6 @@ document.querySelector('[name="player_count"]').addEventListener('change', funct
         8: [30, 24, 20, 16, 12, 8, 4, 0],
         10: [50, 42, 36, 30, 24, 18, 12, 8, 4, 0]
     };
-
-    // 生成选手输入框
-    for(let i = 1; i <= count; i++) {
-        playersHtml += `
-            <div class="mb-2">
-                <label class="form-label">选手 ${i} 姓名:</label>
-                <input type="text" class="form-control" name="player_${i}" required>
-                <div class="invalid-feedback">请输入选手姓名</div>
-            </div>`;
-    }
 
     // 生成积分规则输入框并填充默认值
     if (defaultPoints[count]) {
@@ -93,9 +178,370 @@ document.querySelector('[name="player_count"]').addEventListener('change', funct
         }
     }
 
-    document.getElementById('players').innerHTML = playersHtml;
     document.getElementById('rules').innerHTML = rulesHtml;
+}
+
+// 随机分组（合并了应用分组功能）
+document.getElementById('randomGroupBtn').addEventListener('click', function() {
+    const count = parseInt(document.querySelector('[name="player_count"]').value);
+    if (!count) return;
+    
+    // 保存当前玩家名字
+    savePlayerNames();
+    
+    // 验证对冲组
+    const validHedgeGroups = hedgeGroups.filter(g => g.player1 !== -1 && g.player2 !== -1);
+    
+    if (validHedgeGroups.length > 0) {
+        // 检查是否有重复的玩家
+        const usedPlayers = new Set();
+        let hasError = false;
+        
+        for (const group of validHedgeGroups) {
+            if (usedPlayers.has(group.player1) || usedPlayers.has(group.player2)) {
+                alert('同一个玩家不能在多个对冲组中！');
+                hasError = true;
+                break;
+            }
+            if (group.player1 === group.player2) {
+                alert('对冲组中不能选择同一个玩家！');
+                hasError = true;
+                break;
+            }
+            usedPlayers.add(group.player1);
+            usedPlayers.add(group.player2);
+        }
+        
+        if (hasError) return;
+        
+        // 尝试应用对冲分组
+        if (!applyHedgeGrouping(count, validHedgeGroups)) {
+            alert('无法满足所有对冲条件，请减少对冲组数量或重新选择！');
+            return;
+        }
+    } else {
+        // 没有对冲组，执行全局随机分组
+        // Fisher-Yates 洗牌算法
+        playerOrder = Array.from({length: count}, (_, i) => i);
+        for (let i = playerOrder.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [playerOrder[i], playerOrder[j]] = [playerOrder[j], playerOrder[i]];
+        }
+    }
+    
+    // 重新生成输入框并填充玩家名字
+    regeneratePlayerInputs();
 });
+
+// 设置对冲玩家
+document.getElementById('setHedgeBtn').addEventListener('click', function() {
+    savePlayerNames();
+    const hedgeSettings = document.getElementById('hedge-settings');
+    hedgeSettings.style.display = hedgeSettings.style.display === 'none' ? 'block' : 'none';
+    
+    if (hedgeGroups.length === 0) {
+        addHedgeGroup();
+    }
+});
+
+// 添加对冲组
+document.getElementById('addHedgeGroupBtn').addEventListener('click', function() {
+    addHedgeGroup();
+});
+
+function addHedgeGroup() {
+    const count = parseInt(document.querySelector('[name="player_count"]').value);
+    const maxGroups = Math.floor(count / 2);
+    
+    if (hedgeGroups.length >= maxGroups) {
+        alert(`最多只能设置 ${maxGroups} 组对冲玩家！`);
+        return;
+    }
+    
+    const groupIndex = hedgeGroups.length;
+    hedgeGroups.push({player1: -1, player2: -1});
+    
+    const hedgeGroupsDiv = document.getElementById('hedge-groups');
+    const groupHtml = `
+        <div class="card mb-2 hedge-group" data-index="${groupIndex}">
+            <div class="card-body">
+                <div class="row align-items-center">
+                    <div class="col">
+                        <label class="form-label">对冲组 ${groupIndex + 1}</label>
+                        <div class="row g-2">
+                            <div class="col-md-5">
+                                <select class="form-select hedge-player1" data-group="${groupIndex}">
+                                    <option value="-1">选择玩家1</option>
+                                    ${generatePlayerOptions(count)}
+                                </select>
+                            </div>
+                            <div class="col-md-2 text-center">
+                                <i class="bi bi-arrow-left-right"></i>
+                            </div>
+                            <div class="col-md-5">
+                                <select class="form-select hedge-player2" data-group="${groupIndex}">
+                                    <option value="-1">选择玩家2</option>
+                                    ${generatePlayerOptions(count)}
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-auto">
+                        <button type="button" class="btn btn-sm btn-danger remove-hedge-group" data-index="${groupIndex}">
+                            <i class="bi bi-trash"></i>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    hedgeGroupsDiv.insertAdjacentHTML('beforeend', groupHtml);
+    
+    // 绑定事件
+    bindHedgeGroupEvents();
+}
+
+function generatePlayerOptions(count) {
+    let options = '';
+    for (let i = 0; i < count; i++) {
+        const name = playerNames[i] || `选手 ${i + 1}`;
+        options += `<option value="${i}">${name}</option>`;
+    }
+    return options;
+}
+
+function bindHedgeGroupEvents() {
+    document.querySelectorAll('.hedge-player1, .hedge-player2').forEach(select => {
+        select.addEventListener('change', function() {
+            const groupIndex = parseInt(this.dataset.group);
+            const isPlayer1 = this.classList.contains('hedge-player1');
+            const playerIndex = parseInt(this.value);
+            
+            if (isPlayer1) {
+                hedgeGroups[groupIndex].player1 = playerIndex;
+            } else {
+                hedgeGroups[groupIndex].player2 = playerIndex;
+            }
+        });
+    });
+    
+    document.querySelectorAll('.remove-hedge-group').forEach(btn => {
+        btn.addEventListener('click', function() {
+            const index = parseInt(this.dataset.index);
+            this.closest('.hedge-group').remove();
+            hedgeGroups.splice(index, 1);
+            // 重新渲染所有对冲组
+            renderHedgeGroups();
+        });
+    });
+}
+
+function renderHedgeGroups() {
+    const count = parseInt(document.querySelector('[name="player_count"]').value);
+    const hedgeGroupsDiv = document.getElementById('hedge-groups');
+    hedgeGroupsDiv.innerHTML = '';
+    
+    const tempGroups = [...hedgeGroups];
+    hedgeGroups = [];
+    
+    tempGroups.forEach(group => {
+        addHedgeGroup();
+        const groupIndex = hedgeGroups.length - 1;
+        hedgeGroups[groupIndex] = group;
+        
+        if (group.player1 !== -1) {
+            document.querySelector(`.hedge-player1[data-group="${groupIndex}"]`).value = group.player1;
+        }
+        if (group.player2 !== -1) {
+            document.querySelector(`.hedge-player2[data-group="${groupIndex}"]`).value = group.player2;
+        }
+    });
+}
+
+function applyHedgeGrouping(count, validHedgeGroups) {
+    // 创建新的顺序数组
+    const newOrder = new Array(count).fill(-1);
+    
+    // 准备所有的奇数位置和偶数位置
+    const team1Positions = []; // 队伍1（奇数位置：0, 2, 4, ...）
+    const team2Positions = []; // 队伍2（偶数位置：1, 3, 5, ...）
+    
+    for (let i = 0; i < count; i += 2) {
+        team1Positions.push(i);
+    }
+    for (let i = 1; i < count; i += 2) {
+        team2Positions.push(i);
+    }
+    
+    // 随机打乱位置数组
+    for (let i = team1Positions.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [team1Positions[i], team1Positions[j]] = [team1Positions[j], team1Positions[i]];
+    }
+    for (let i = team2Positions.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [team2Positions[i], team2Positions[j]] = [team2Positions[j], team2Positions[i]];
+    }
+    
+    // 首先安排对冲玩家
+    for (let groupIdx = 0; groupIdx < validHedgeGroups.length; groupIdx++) {
+        const group = validHedgeGroups[groupIdx];
+        
+        // 随机决定哪个玩家去队伍1，哪个玩家去队伍2
+        const shouldSwap = Math.random() < 0.5;
+        const toTeam1 = shouldSwap ? group.player2 : group.player1;
+        const toTeam2 = shouldSwap ? group.player1 : group.player2;
+        
+        // 检查是否还有可用位置
+        if (groupIdx >= team1Positions.length || groupIdx >= team2Positions.length) {
+            return false; // 无法满足条件
+        }
+        
+        // 使用随机打乱后的位置
+        const team1Pos = team1Positions[groupIdx];
+        const team2Pos = team2Positions[groupIdx];
+        
+        newOrder[team1Pos] = toTeam1;
+        newOrder[team2Pos] = toTeam2;
+    }
+    
+    // 填充剩余玩家
+    const remainingPlayers = [];
+    for (let i = 0; i < count; i++) {
+        if (!Array.from(validHedgeGroups).some(g => g.player1 === i || g.player2 === i)) {
+            remainingPlayers.push(i);
+        }
+    }
+    
+    // 随机打乱剩余玩家
+    for (let i = remainingPlayers.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [remainingPlayers[i], remainingPlayers[j]] = [remainingPlayers[j], remainingPlayers[i]];
+    }
+    
+    // 填充到剩余位置
+    let remainingIndex = 0;
+    for (let i = 0; i < count; i++) {
+        if (newOrder[i] === -1) {
+            newOrder[i] = remainingPlayers[remainingIndex++];
+        }
+    }
+    
+    playerOrder = newOrder;
+    return true;
+}
+
+function savePlayerNames() {
+    const count = parseInt(document.querySelector('[name="player_count"]').value);
+    if (!count) return;
+    
+    // 如果 playerOrder 未初始化或长度不对，重新初始化
+    if (!playerOrder || playerOrder.length !== count) {
+        playerOrder = Array.from({length: count}, (_, i) => i);
+    }
+    
+    document.querySelectorAll('.player-name-input').forEach((input, index) => {
+        if (index < playerOrder.length) {
+            playerNames[playerOrder[index]] = input.value;
+        }
+    });
+}
+
+function regeneratePlayerInputs() {
+    const count = parseInt(document.querySelector('[name="player_count"]').value);
+    if (!count) return;
+    
+    // 确保 playerOrder 正确初始化
+    if (!playerOrder || playerOrder.length !== count) {
+        playerOrder = Array.from({length: count}, (_, i) => i);
+    }
+    
+    let playersHtml = '';
+    
+    for(let i = 0; i < count; i++) {
+        const playerIndex = playerOrder[i];
+        const name = (playerIndex !== undefined && playerNames[playerIndex]) ? playerNames[playerIndex] : '';
+        const team = (i + 1) % 2 === 1 ? '队伍1' : '队伍2';
+        const teamColor = (i + 1) % 2 === 1 ? 'primary' : 'success';
+        
+        playersHtml += `
+            <div class="mb-2 player-input">
+                <label class="form-label">
+                    选手 ${i + 1} 姓名 
+                    <span class="badge bg-${teamColor}">${team}</span>
+                </label>
+                <input type="text" class="form-control player-name-input" name="player_${i + 1}" value="${name}" required>
+                <div class="invalid-feedback">请输入选手姓名</div>
+            </div>`;
+    }
+
+    document.getElementById('players').innerHTML = playersHtml;
+    
+    // 重新绑定输入事件
+    document.querySelectorAll('.player-name-input').forEach((input, index) => {
+        input.addEventListener('input', function() {
+            if (index < playerOrder.length) {
+                playerNames[playerOrder[index]] = this.value;
+            }
+        });
+    });
+    
+    updateTeamsDisplay();
+}
+
+function updateTeamsDisplay() {
+    const count = parseInt(document.querySelector('[name="player_count"]').value);
+    if (!count) return;
+    
+    // 确保 playerOrder 正确初始化
+    if (!playerOrder || playerOrder.length !== count) {
+        playerOrder = Array.from({length: count}, (_, i) => i);
+    }
+    
+    const team1 = [], team2 = [];
+    
+    for (let i = 0; i < count; i++) {
+        const playerIndex = playerOrder[i];
+        const name = (playerIndex !== undefined && playerNames[playerIndex]) ? playerNames[playerIndex] : `选手 ${i + 1}`;
+        if ((i + 1) % 2 === 1) {
+            team1.push(name);
+        } else {
+            team2.push(name);
+        }
+    }
+    
+    const teamsHtml = `
+        <div class="row">
+            <div class="col-md-6 mb-3 mb-md-0">
+                <div class="card border-primary">
+                    <div class="card-header bg-primary text-white">
+                        <strong>队伍1</strong>
+                    </div>
+                    <div class="card-body">
+                        <ul class="list-unstyled mb-0">
+                            ${team1.map(name => `<li><i class="bi bi-person-fill"></i> ${name || '待输入'}</li>`).join('')}
+                        </ul>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-6">
+                <div class="card border-success">
+                    <div class="card-header bg-success text-white">
+                        <strong>队伍2</strong>
+                    </div>
+                    <div class="card-body">
+                        <ul class="list-unstyled mb-0">
+                            ${team2.map(name => `<li><i class="bi bi-person-fill"></i> ${name || '待输入'}</li>`).join('')}
+                        </ul>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    document.getElementById('current-teams').innerHTML = teamsHtml;
+}
 
 // 地点选择逻辑
 const locationRadios = document.querySelectorAll('input[name="location_select"]');

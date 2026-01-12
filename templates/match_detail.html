@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% block content %}
-<h1 class="mb-4">比赛详情</h1>
+<h1 class="mb-4" id="pageTitle" style="cursor: pointer;">比赛详情</h1>
 <div class="card mb-3">
     <div class="card-body">
         <p class="card-text">时间: {{ match.time }}</p>
@@ -21,6 +21,7 @@
     <thead>
         <tr>
             <th>队伍</th>
+            <th>成员</th>
             <th>总分</th>
             <th>级牌</th>
         </tr>
@@ -28,11 +29,23 @@
     <tbody>
         <tr>
             <td>奇数队</td>
+            <td>
+                {% set team1_players = players|selectattr('team', 'equalto', 1)|list %}
+                {% for player in team1_players %}
+                    <span class="badge bg-light text-dark me-1">{{ player.name }}</span>
+                {% endfor %}
+            </td>
             <td>{{ team_scores[1] }}</td>
             <td>{{ team_levels[1] }}</td>
         </tr>
         <tr>
             <td>偶数队</td>
+            <td>
+                {% set team2_players = players|selectattr('team', 'equalto', 2)|list %}
+                {% for player in team2_players %}
+                    <span class="badge bg-light text-dark me-1">{{ player.name }}</span>
+                {% endfor %}
+            </td>
             <td>{{ team_scores[2] }}</td>
             <td>{{ team_levels[2] }}</td>
         </tr>
@@ -122,10 +135,25 @@
 </div>
 {% endif %}
 
+<!-- 管理员模式：删除比赛按钮 -->
+<div class="mb-4" id="adminDeleteMatch" style="display: none;">
+    <form method="POST" action="{{ url_for('delete_match', match_id=match.id) }}" class="d-inline">
+        <input type="hidden" name="admin_mode" value="1">
+        <button type="submit" class="btn btn-danger" 
+                onclick="return confirm('确定要删除这场比赛吗？所有数据将被永久删除！');">删除比赛</button>
+    </form>
+</div>
+
 
 <h2 class="mt-4">历史成绩</h2>
 {% for round, scores in rounds|dictsort(by='key', reverse=true) %}
-    <h3>第 {{ round }} 轮</h3>
+    <div class="d-flex align-items-center mb-2">
+        <h3 class="mb-0">第 {{ round }} 轮</h3>
+        <form method="POST" action="{{ url_for('delete_round', match_id=match.id, round_number=round) }}" class="d-inline ms-3 admin-delete-round" style="display: none !important;">
+            <button type="submit" class="btn btn-sm btn-danger" 
+                    onclick="return confirm('确定要删除第{{ round }}轮的成绩吗？');">删除</button>
+        </form>
+    </div>
     <table class="table table-striped mb-3">
         <thead>
             <tr>
@@ -148,5 +176,41 @@
     </table>
 {% endfor %}
 
+<script>
+// 管理员模式
+let clickCount = 0;
+let clickTimer = null;
+let isAdminMode = false;
+
+document.getElementById('pageTitle').addEventListener('click', function() {
+    clickCount++;
+    
+    if (clickTimer) {
+        clearTimeout(clickTimer);
+    }
+    
+    if (clickCount === 3) {
+        // 三次点击完成，提示输入密码
+        const password = prompt('请输入管理员密码：');
+        if (password === 'guandan2025') {
+            isAdminMode = true;
+            alert('管理员模式已开启');
+            // 显示所有管理员功能按钮
+            document.getElementById('adminDeleteMatch').style.display = 'block';
+            document.querySelectorAll('.admin-delete-round').forEach(el => {
+                el.style.setProperty('display', 'inline', 'important');
+            });
+        } else if (password !== null) {
+            alert('密码错误');
+        }
+        clickCount = 0;
+    } else {
+        // 设置3秒超时重置计数
+        clickTimer = setTimeout(() => {
+            clickCount = 0;
+        }, 3000);
+    }
+});
+</script>
 
 {% endblock %}

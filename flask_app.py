@@ -49,7 +49,13 @@ def index():
     page = request.args.get('page', 1, type=int)
     per_page = 10  # 每页10条记录
     
-    # 优化：使用数据库分页，只查询当前页需要的数据
+    # 获取所有有比赛的年份（赛季列表）
+    all_seasons = db.session.query(
+        db.func.extract('year', Match.time).label('year')
+    ).distinct().order_by(db.desc('year')).all()
+    available_seasons = [int(year[0]) for year in all_seasons if year[0]]
+    
+    # 优化：使用数据库分页，只查询当前页需要的数据（所有比赛）
     total_matches = Match.query.count()
     total_pages = (total_matches + per_page - 1) // per_page  # 向上取整
     
@@ -61,84 +67,102 @@ def index():
     # 为了计算胜率，仍需要所有已完成比赛的列表（但只查询ID和状态）
     all_match_ids = db.session.query(Match.id, Match.status).all()
 
-    # 优化：使用一次查询获取所有分数，按玩家名称聚合
-    # 使用数据库的 JOIN 和聚合功能
-    score_query = db.session.query(
-        Player.name,
-        db.func.sum(RoundScore.points).label('total_score')
-    ).join(RoundScore, Player.id == RoundScore.player_id
-    ).filter(RoundScore.points.isnot(None)
-    ).group_by(Player.name
-    ).order_by(db.desc('total_score')).all()
-    
-    player_scores = {name: score for name, score in score_query}
-    score_rankings_with_index = [(i + 1, name, score) for i, (name, score) in enumerate(score_query)]
+    # 为每个赛季计算排行榜数据
+    seasons_data = []
+    for season_year in available_seasons:
+        # 获取该赛季的所有比赛ID
+        season_match_ids = db.session.query(Match.id, Match.status).filter(
+            db.extract('year', Match.time) == season_year
+        ).all()
+        
+        season_finished_match_ids = [m_id for m_id, status in season_match_ids if status == 'finished']
+        
+        # 计算该赛季的胜率排行榜和收益排行榜
+        season_win_rate_rankings = []
+        season_profit_rankings = []
+        if season_finished_match_ids:
+            # 一次性加载该赛季所有需要的数据
+            all_players_in_finished = Player.query.filter(Player.match_id.in_(season_finished_match_ids)).all()
+            all_scores_in_finished = RoundScore.query.filter(RoundScore.match_id.in_(season_finished_match_ids)).all()
+            
+            # 构建索引以快速查找
+            players_by_match = {}
+            for player in all_players_in_finished:
+                if player.match_id not in players_by_match:
+                    players_by_match[player.match_id] = []
+                players_by_match[player.match_id].append(player)
+            
+            scores_by_match_player = {}
+            for score in all_scores_in_finished:
+                key = (score.match_id, score.player_id)
+                if key not in scores_by_match_player:
+                    scores_by_match_player[key] = []
+                scores_by_match_player[key].append(score)
+            
+            # 计算选手胜率和收益排行榜
+            player_stats = {}  # {name: {'matches': 场次, 'wins': 胜场, 'profit': 收益}}
+            for match_id in season_finished_match_ids:
+                players = players_by_match.get(match_id, [])
+                if not players:
+                    continue
+                    
+                total_scores = {}
+                for player in players:
+                    player_scores = scores_by_match_player.get((match_id, player.id), [])
+                    total_scores[player.id] = sum(score.points for score in player_scores if score.points is not None)
 
-    # 优化：使用一次查询获取所有已完成比赛的玩家和分数
-    finished_match_ids = [m_id for m_id, status in all_match_ids if status == 'finished']
-    
-    if finished_match_ids:
-        # 一次性加载所有需要的数据
-        all_players_in_finished = Player.query.filter(Player.match_id.in_(finished_match_ids)).all()
-        all_scores_in_finished = RoundScore.query.filter(RoundScore.match_id.in_(finished_match_ids)).all()
-        
-        # 构建索引以快速查找
-        players_by_match = {}
-        for player in all_players_in_finished:
-            if player.match_id not in players_by_match:
-                players_by_match[player.match_id] = []
-            players_by_match[player.match_id].append(player)
-        
-        scores_by_match_player = {}
-        for score in all_scores_in_finished:
-            key = (score.match_id, score.player_id)
-            if key not in scores_by_match_player:
-                scores_by_match_player[key] = []
-            scores_by_match_player[key].append(score)
-        
-        # 计算选手胜率排行榜
-        player_stats = {}  # {name: {'matches': 场次, 'wins': 胜场}}
-        for match_id in finished_match_ids:
-            players = players_by_match.get(match_id, [])
-            if not players:
-                continue
+                team_scores = {1: 0, 2: 0}
+                for player in players:
+                    team_scores[player.team] += total_scores.get(player.id, 0)
+
+                winning_team = 1 if team_scores[1] > team_scores[2] else 2 if team_scores[2] > team_scores[1] else None
                 
-            total_scores = {}
-            for player in players:
-                player_scores = scores_by_match_player.get((match_id, player.id), [])
-                total_scores[player.id] = sum(score.points for score in player_scores if score.points is not None)
+                # 计算收益/亏损（积分差，88封顶）
+                score_diff = abs(team_scores[1] - team_scores[2])
+                score_diff = min(score_diff, 88)  # 积分差88封顶
 
-            team_scores = {1: 0, 2: 0}
-            for player in players:
-                team_scores[player.team] += total_scores.get(player.id, 0)
-
-            winning_team = 1 if team_scores[1] > team_scores[2] else 2 if team_scores[2] > team_scores[1] else None
-
-            for player in players:
-                name = player.name
-                if name not in player_stats:
-                    player_stats[name] = {'matches': 0, 'wins': 0}
-                player_stats[name]['matches'] += 1
-                if winning_team and player.team == winning_team:
-                    player_stats[name]['wins'] += 1
-                # 如果平局，算两边都胜利
-                if not winning_team:
-                    player_stats[name]['wins'] += 1
-    else:
-        player_stats = {}
-
-    # 计算胜率并排序
-    win_rate_rankings = []
-    for name, stats in player_stats.items():
-        win_rate = stats['wins'] / stats['matches'] if stats['matches'] > 0 else 0
-        win_rate_rankings.append((name, stats['matches'], stats['wins'], win_rate))
-    sorted_win_rate_rankings = sorted(win_rate_rankings, key=lambda x: (x[3], x[1]), reverse=True)
-    win_rate_rankings_with_index = [(i + 1, name, matches, wins, f"{win_rate:.2%}") for i, (name, matches, wins, win_rate) in enumerate(sorted_win_rate_rankings)]
-
+                for player in players:
+                    name = player.name
+                    if name not in player_stats:
+                        player_stats[name] = {'matches': 0, 'wins': 0, 'profit': 0}
+                    player_stats[name]['matches'] += 1
+                    if winning_team and player.team == winning_team:
+                        player_stats[name]['wins'] += 1
+                        player_stats[name]['profit'] += score_diff  # 赢家获得积分差（最多88）
+                    elif winning_team:
+                        player_stats[name]['profit'] -= score_diff  # 输家失去积分差（最多88）
+                    # 如果平局，算两边都胜利
+                    if not winning_team:
+                        player_stats[name]['wins'] += 1
+            
+            # 计算胜率并排序
+            win_rate_rankings = []
+            for name, stats in player_stats.items():
+                win_rate = stats['wins'] / stats['matches'] if stats['matches'] > 0 else 0
+                win_rate_rankings.append((name, stats['matches'], stats['wins'], win_rate))
+            sorted_win_rate_rankings = sorted(win_rate_rankings, key=lambda x: (x[3], x[1]), reverse=True)
+            season_win_rate_rankings = [(i + 1, name, matches, wins, f"{win_rate:.2%}") for i, (name, matches, wins, win_rate) in enumerate(sorted_win_rate_rankings)]
+            
+            # 计算收益并排序
+            profit_rankings = []
+            for name, stats in player_stats.items():
+                profit_rankings.append((name, stats['profit'], stats['matches']))
+            sorted_profit_rankings = sorted(profit_rankings, key=lambda x: x[1], reverse=True)
+            season_profit_rankings = [(i + 1, name, profit, matches) for i, (name, profit, matches) in enumerate(sorted_profit_rankings)]
+        else:
+            season_win_rate_rankings = []
+            season_profit_rankings = []
+        
+        # 将该赛季数据添加到列表
+        seasons_data.append({
+            'year': season_year,
+            'win_rate_rankings': season_win_rate_rankings,
+            'profit_rankings': season_profit_rankings
+        })
+    
     return render_template('index.html', 
                          matches=paginated_matches, 
-                         score_rankings=score_rankings_with_index, 
-                         win_rate_rankings=win_rate_rankings_with_index,
+                         seasons_data=seasons_data,
                          page=page,
                          total_pages=total_pages,
                          total_matches=total_matches)
@@ -290,16 +314,35 @@ def match_detail(match_id):
 @app.route('/delete_match/<int:match_id>', methods=['POST'])
 def delete_match(match_id):
     match = Match.query.get_or_404(match_id)
-    if match.status == 'finished':
+    
+    # 检查是否为管理员模式
+    is_admin = request.form.get('admin_mode') == '1'
+    
+    if match.status == 'finished' and not is_admin:
         flash('错误：已结束的比赛不能删除！')
         return redirect(url_for('index'))
 
     ScoreRule.query.filter_by(match_id=match_id).delete()
     RoundScore.query.filter_by(match_id=match_id).delete()
+    Player.query.filter_by(match_id=match_id).delete()
     db.session.delete(match)
     db.session.commit()
     flash('比赛已删除！')
     return redirect(url_for('index'))
+
+@app.route('/delete_round/<int:match_id>/<int:round_number>', methods=['POST'])
+def delete_round(match_id, round_number):
+    match = Match.query.get_or_404(match_id)
+    
+    # 删除指定轮次的所有成绩
+    RoundScore.query.filter_by(
+        match_id=match_id,
+        round_number=round_number
+    ).delete()
+    
+    db.session.commit()
+    flash(f'第 {round_number} 轮成绩已删除！')
+    return redirect(url_for('match_detail', match_id=match_id))
 
 @app.route('/annual_report')
 def annual_report():
