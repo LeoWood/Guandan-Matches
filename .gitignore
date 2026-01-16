@@ -2,3 +2,14 @@ instance/
 __pycache__/
 .vscode/
 .DS_Store
+.idea/guandan.iml
+.idea/copilot.data.migration.agent.xml
+.gitignore
+.idea/copilot.data.migration.ask2agent.xml
+.idea/copilot.data.migration.edit.xml
+.idea/misc.xml
+.gitignore
+.idea/modules.xml
+.idea/vcs.xml
+.idea/inspectionProfiles/profiles_settings.xml
+.idea/inspectionProfiles/Project_Default.xml

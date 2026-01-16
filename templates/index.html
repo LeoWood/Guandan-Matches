@@ -197,7 +197,7 @@
                                         <td>{{ matches }}</td>
                                         <td>
                                             <strong class="{% if profit > 0 %}text-success{% elif profit < 0 %}text-danger{% endif %}">
-                                                {% if profit > 0 %}+{% endif %}{{ profit }}
+                                                {% if profit > 0 %}+{% endif %}{{ profit|int }}
                                             </strong>
                                         </td>
                                     </tr>

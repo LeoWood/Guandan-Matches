@@ -61,7 +61,19 @@
     {% endif %}
 </p>
 
+{% if match.status == 'finished' and match.manual_reward is not none %}
+<p>
+    <span class="text-muted">当前收益: {{ match.manual_reward|int }}</span>
+    <span class="badge bg-info">手动设置</span>
+</p>
+{% endif %}
+
 <a href="{{ url_for('index') }}" class="btn btn-secondary">返回主页</a>
+
+<!-- 管理员模式：修改收益按钮 -->
+{% if match.status == 'finished' %}
+<button type="button" class="btn btn-sm btn-info ms-2 admin-edit-reward" style="display: none;" data-bs-toggle="modal" data-bs-target="#editRewardModal">修改收益</button>
+{% endif %}
 
 {% if match.status == 'ongoing' %}
 <h2 class="mt-4">录入本轮成绩</h2>
@@ -81,8 +93,63 @@
 </form>
 
 <script>
+    const selects = document.querySelectorAll('select[name^="player_"]');
+    
+    // 为每个下拉框添加change事件监听器
+    selects.forEach((select, index) => {
+        select.addEventListener('change', function() {
+            updateAvailableOptions();
+        });
+    });
+    
+    // 更新所有下拉框的可用选项
+    function updateAvailableOptions() {
+        const selectedValues = new Set();
+        
+        // 收集所有已选择的值
+        selects.forEach(select => {
+            if (select.value) {
+                selectedValues.add(select.value);
+            }
+        });
+        
+        // 更新每个下拉框
+        selects.forEach((currentSelect, currentIndex) => {
+            const currentValue = currentSelect.value;
+            const options = currentSelect.querySelectorAll('option');
+            
+            // 获取当前下拉框之前所有已选择的值
+            const previousSelectedValues = new Set();
+            for (let i = 0; i < currentIndex; i++) {
+                if (selects[i].value) {
+                    previousSelectedValues.add(selects[i].value);
+                }
+            }
+            
+            // 显示/隐藏选项
+            options.forEach(option => {
+                if (option.value === currentValue) {
+                    // 当前选中的选项始终显示
+                    option.style.display = '';
+                    option.disabled = false;
+                } else if (previousSelectedValues.has(option.value)) {
+                    // 如果该选项在之前的排名中已被选择，则隐藏
+                    option.style.display = 'none';
+                    option.disabled = true;
+                } else {
+                    // 其他选项正常显示
+                    option.style.display = '';
+                    option.disabled = false;
+                }
+            });
+        });
+    }
+    
+    // 页面加载时初始化
+    updateAvailableOptions();
+    
+    // 表单提交验证
     document.getElementById('scoreForm').addEventListener('submit', function(event) {
-        const selects = document.querySelectorAll('select[name^="player_"]');
         const selectedValues = new Set();
         let hasDuplicate = false;
         
@@ -127,11 +194,35 @@
 
 {% if match.status == 'ongoing' %}
 <div class="mb-4">
-    <form method="POST" class="d-inline">
+    <form method="POST" class="d-inline" id="endMatchForm">
         <input type="hidden" name="end_match" value="1">
-        <button type="submit" class="btn btn-warning" 
-                onclick="return confirm('确定要结束这场比赛吗？');">结束比赛</button>
+        <input type="hidden" name="manual_reward" id="manualRewardInput" value="">
+        <button type="button" class="btn btn-warning" data-bs-toggle="modal" data-bs-target="#endMatchModal">结束比赛</button>
     </form>
+</div>
+
+<!-- 结束比赛对话框 -->
+<div class="modal fade" id="endMatchModal" tabindex="-1" aria-labelledby="endMatchModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="endMatchModalLabel">结束比赛</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <!-- <p>确认要结束本场比赛吗？</p> -->
+                <div class="mb-3">
+                    <label for="rewardInput" class="form-label">本场比赛最终收益</label>
+                    <input type="number" class="form-control" id="rewardInput" placeholder="请输入正整数" step="1" min="0">
+                    <div class="form-text">若不输入，将按默认规则（积分差，88封顶）自动计算收益</div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                <button type="button" class="btn btn-warning" onclick="confirmEndMatch()">确认</button>
+            </div>
+        </div>
+    </div>
 </div>
 {% endif %}
 
@@ -143,6 +234,38 @@
                 onclick="return confirm('确定要删除这场比赛吗？所有数据将被永久删除！');">删除比赛</button>
     </form>
 </div>
+
+<!-- 修改收益对话框 -->
+{% if match.status == 'finished' %}
+<div class="modal fade" id="editRewardModal" tabindex="-1" aria-labelledby="editRewardModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="editRewardModalLabel">修改比赛收益</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <form method="POST">
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label for="editRewardInput" class="form-label">本场比赛最终收益</label>
+                        <input type="number" class="form-control" id="editRewardInput" name="edit_reward" 
+                               placeholder="请输入正整数" step="1" min="0" 
+                               value="{{ match.manual_reward|int if match.manual_reward is not none else '' }}">
+                        <div class="form-text">留空则按默认规则（积分差，88封顶）计算收益</div>
+                        {% if match.manual_reward is none %}
+                        <div class="form-text text-muted">当前使用默认规则，计算值: {{ [score_difference, 88]|min|int }}</div>
+                        {% endif %}
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                    <button type="submit" class="btn btn-info" onclick="return validateEditReward()">保存</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+{% endif %}
 
 
 <h2 class="mt-4">历史成绩</h2>
@@ -177,6 +300,48 @@
 {% endfor %}
 
 <script>
+// 确认结束比赛
+function confirmEndMatch() {
+    const rewardValue = document.getElementById('rewardInput').value.trim();
+    
+    // 如果有输入，验证是否为正整数
+    if (rewardValue) {
+        const numValue = Number(rewardValue);
+        
+        // 检查是否为有效数字、是否为整数、是否为正数
+        if (isNaN(numValue) || !Number.isInteger(numValue) || numValue <= 0) {
+            alert('请输入正整数！');
+            return;
+        }
+        
+        document.getElementById('manualRewardInput').value = numValue;
+    }
+    
+    // 关闭模态框
+    const modal = bootstrap.Modal.getInstance(document.getElementById('endMatchModal'));
+    modal.hide();
+    // 提交表单
+    document.getElementById('endMatchForm').submit();
+}
+
+// 验证修改收益输入
+function validateEditReward() {
+    const rewardValue = document.getElementById('editRewardInput').value.trim();
+    
+    // 如果有输入，验证是否为正整数
+    if (rewardValue) {
+        const numValue = Number(rewardValue);
+        
+        // 检查是否为有效数字、是否为整数、是否为正数
+        if (isNaN(numValue) || !Number.isInteger(numValue) || numValue <= 0) {
+            alert('请输入正整数！');
+            return false;
+        }
+    }
+    
+    return true;
+}
+
 // 管理员模式
 let clickCount = 0;
 let clickTimer = null;
@@ -199,6 +364,9 @@ document.getElementById('pageTitle').addEventListener('click', function() {
             document.getElementById('adminDeleteMatch').style.display = 'block';
             document.querySelectorAll('.admin-delete-round').forEach(el => {
                 el.style.setProperty('display', 'inline', 'important');
+            });
+            document.querySelectorAll('.admin-edit-reward').forEach(el => {
+                el.style.display = 'inline-block';
             });
         } else if (password !== null) {
             alert('密码错误');

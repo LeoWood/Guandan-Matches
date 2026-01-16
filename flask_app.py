@@ -15,6 +15,7 @@ class Match(db.Model):
     time = db.Column(db.DateTime)
     location = db.Column(db.String(100))
     status = db.Column(db.String(20), default='ongoing')
+    manual_reward = db.Column(db.Float, nullable=True)  # 手动设置的胜方收益，如果为空则使用默认规则
     players = db.relationship('Player', backref='match', lazy=True, cascade="all, delete-orphan")
     scores = db.relationship('RoundScore', backref='match', lazy=True, cascade="all, delete-orphan")
 
@@ -101,6 +102,10 @@ def index():
             
             # 计算选手胜率和收益排行榜
             player_stats = {}  # {name: {'matches': 场次, 'wins': 胜场, 'profit': 收益}}
+            
+            # 一次性获取所有比赛信息，包括manual_reward字段
+            matches_info = {m.id: m for m in Match.query.filter(Match.id.in_(season_finished_match_ids)).all()}
+            
             for match_id in season_finished_match_ids:
                 players = players_by_match.get(match_id, [])
                 if not players:
@@ -117,9 +122,14 @@ def index():
 
                 winning_team = 1 if team_scores[1] > team_scores[2] else 2 if team_scores[2] > team_scores[1] else None
                 
-                # 计算收益/亏损（积分差，88封顶）
-                score_diff = abs(team_scores[1] - team_scores[2])
-                score_diff = min(score_diff, 88)  # 积分差88封顶
+                # 计算收益/亏损
+                # 优先使用手动设置的收益，否则使用默认规则（积分差，88封顶）
+                match_obj = matches_info.get(match_id)
+                if match_obj and match_obj.manual_reward is not None:
+                    score_diff = match_obj.manual_reward
+                else:
+                    score_diff = abs(team_scores[1] - team_scores[2])
+                    score_diff = min(score_diff, 88)  # 积分差88封顶
 
                 for player in players:
                     name = player.name
@@ -128,9 +138,9 @@ def index():
                     player_stats[name]['matches'] += 1
                     if winning_team and player.team == winning_team:
                         player_stats[name]['wins'] += 1
-                        player_stats[name]['profit'] += score_diff  # 赢家获得积分差（最多88）
+                        player_stats[name]['profit'] += score_diff  # 赢家获得收益
                     elif winning_team:
-                        player_stats[name]['profit'] -= score_diff  # 输家失去积分差（最多88）
+                        player_stats[name]['profit'] -= score_diff  # 输家失去收益
                     # 如果平局，算两边都胜利
                     if not winning_team:
                         player_stats[name]['wins'] += 1
@@ -231,8 +241,32 @@ def match_detail(match_id):
 
         elif 'end_match' in request.form:
             match.status = 'finished'
+            # 处理手动设置的收益
+            manual_reward = request.form.get('manual_reward', '').strip()
+            if manual_reward:
+                try:
+                    match.manual_reward = float(manual_reward)
+                    flash(f'比赛已结束！胜方收益已手动设置为: {int(match.manual_reward)}')
+                except ValueError:
+                    flash('收益值无效，将使用默认规则计算')
+            else:
+                flash('比赛已结束！将使用默认规则计算收益')
             db.session.commit()
-            flash('比赛已结束！')
+        
+        elif 'edit_reward' in request.form:
+            # 管理员模式：修改已结束比赛的收益
+            edit_reward = request.form.get('edit_reward', '').strip()
+            if edit_reward:
+                try:
+                    match.manual_reward = float(edit_reward)
+                    flash(f'收益已更新为: {int(match.manual_reward)}')
+                except ValueError:
+                    flash('收益值无效')
+            else:
+                # 留空表示使用默认规则
+                match.manual_reward = None
+                flash('已恢复使用默认规则计算收益')
+            db.session.commit()
 
         return redirect(url_for('match_detail', match_id=match_id))
 
@@ -458,9 +492,13 @@ def annual_report():
         
         winning_team = 1 if team_scores[1] > team_scores[2] else 2 if team_scores[2] > team_scores[1] else None
         
-        # 计算收益/亏损（积分差，88封顶）
-        score_diff = abs(team_scores[1] - team_scores[2])
-        score_diff = min(score_diff, 88)  # 积分差88封顶
+        # 计算收益/亏损
+        # 优先使用手动设置的收益，否则使用默认规则（积分差，88封顶）
+        if match.manual_reward is not None:
+            score_diff = match.manual_reward
+        else:
+            score_diff = abs(team_scores[1] - team_scores[2])
+            score_diff = min(score_diff, 88)  # 积分差88封顶
         
         # 统计胜负和参赛次数
         for player in players:
