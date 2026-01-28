@@ -213,7 +213,7 @@
                 <!-- <p>确认要结束本场比赛吗？</p> -->
                 <div class="mb-3">
                     <label for="rewardInput" class="form-label">本场比赛最终收益</label>
-                    <input type="number" class="form-control" id="rewardInput" placeholder="请输入正整数" step="1" min="0">
+                    <input type="number" class="form-control" id="rewardInput" placeholder="请输入非负整数(允许为0)" step="1" min="0">
                     <div class="form-text">若不输入，将按默认规则（积分差，88封顶）自动计算收益</div>
                 </div>
             </div>
@@ -249,7 +249,7 @@
                     <div class="mb-3">
                         <label for="editRewardInput" class="form-label">本场比赛最终收益</label>
                         <input type="number" class="form-control" id="editRewardInput" name="edit_reward" 
-                               placeholder="请输入正整数" step="1" min="0" 
+                               placeholder="请输入非负整数(允许为0)" step="1" min="0" 
                                value="{{ match.manual_reward|int if match.manual_reward is not none else '' }}">
                         <div class="form-text">留空则按默认规则（积分差，88封顶）计算收益</div>
                         {% if match.manual_reward is none %}
@@ -308,9 +308,9 @@ function confirmEndMatch() {
     if (rewardValue) {
         const numValue = Number(rewardValue);
         
-        // 检查是否为有效数字、是否为整数、是否为正数
-        if (isNaN(numValue) || !Number.isInteger(numValue) || numValue <= 0) {
-            alert('请输入正整数！');
+        // 检查是否为有效数字、是否为整数、是否为非负整数
+        if (isNaN(numValue) || !Number.isInteger(numValue) || numValue < 0) {
+            alert('请输入非负整数！');
             return;
         }
         
@@ -332,9 +332,9 @@ function validateEditReward() {
     if (rewardValue) {
         const numValue = Number(rewardValue);
         
-        // 检查是否为有效数字、是否为整数、是否为正数
-        if (isNaN(numValue) || !Number.isInteger(numValue) || numValue <= 0) {
-            alert('请输入正整数！');
+        // 检查是否为有效数字、是否为整数、是否为非负整数
+        if (isNaN(numValue) || !Number.isInteger(numValue) || numValue < 0) {
+            alert('请输入非负整数！');
             return false;
         }
     }
