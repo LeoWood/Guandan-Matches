@@ -78,9 +78,10 @@ def index():
         
         season_finished_match_ids = [m_id for m_id, status in season_match_ids if status == 'finished']
         
-        # 计算该赛季的胜率排行榜和收益排行榜
+        # 计算该赛季的胜率排行榜、收益排行榜和积分排行榜
         season_win_rate_rankings = []
         season_profit_rankings = []
+        season_points_rankings = []
         if season_finished_match_ids:
             # 一次性加载该赛季所有需要的数据
             all_players_in_finished = Player.query.filter(Player.match_id.in_(season_finished_match_ids)).all()
@@ -100,8 +101,8 @@ def index():
                     scores_by_match_player[key] = []
                 scores_by_match_player[key].append(score)
             
-            # 计算选手胜率和收益排行榜
-            player_stats = {}  # {name: {'matches': 场次, 'wins': 胜场, 'profit': 收益}}
+            # 计算选手胜率、收益和积分排行榜
+            player_stats = {}  # {name: {'matches': 场次, 'wins': 胜场, 'profit': 收益, 'points': 总积分}}
             
             # 一次性获取所有比赛信息，包括manual_reward字段
             matches_info = {m.id: m for m in Match.query.filter(Match.id.in_(season_finished_match_ids)).all()}
@@ -134,8 +135,9 @@ def index():
                 for player in players:
                     name = player.name
                     if name not in player_stats:
-                        player_stats[name] = {'matches': 0, 'wins': 0, 'profit': 0}
+                        player_stats[name] = {'matches': 0, 'wins': 0, 'profit': 0, 'points': 0}
                     player_stats[name]['matches'] += 1
+                    player_stats[name]['points'] += total_scores.get(player.id, 0)
                     if winning_team and player.team == winning_team:
                         player_stats[name]['wins'] += 1
                         player_stats[name]['profit'] += score_diff  # 赢家获得收益
@@ -159,15 +161,24 @@ def index():
                 profit_rankings.append((name, stats['profit'], stats['matches']))
             sorted_profit_rankings = sorted(profit_rankings, key=lambda x: x[1], reverse=True)
             season_profit_rankings = [(i + 1, name, profit, matches) for i, (name, profit, matches) in enumerate(sorted_profit_rankings)]
+
+            # 计算积分并排序
+            points_rankings = []
+            for name, stats in player_stats.items():
+                points_rankings.append((name, stats['points'], stats['matches']))
+            sorted_points_rankings = sorted(points_rankings, key=lambda x: (x[1], x[2]), reverse=True)
+            season_points_rankings = [(i + 1, name, points, matches) for i, (name, points, matches) in enumerate(sorted_points_rankings)]
         else:
             season_win_rate_rankings = []
             season_profit_rankings = []
+            season_points_rankings = []
         
         # 将该赛季数据添加到列表
         seasons_data.append({
             'year': season_year,
             'win_rate_rankings': season_win_rate_rankings,
-            'profit_rankings': season_profit_rankings
+            'profit_rankings': season_profit_rankings,
+            'points_rankings': season_points_rankings
         })
     
     return render_template('index.html', 
